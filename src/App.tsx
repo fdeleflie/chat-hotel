@@ -126,6 +126,8 @@ const formatDateSafe = (dateString: string | undefined | null, fallback: string 
 };
 import { useDropzone } from "react-dropzone";
 import { MigrationView } from "./MigrationView";
+import { auth } from './firebase';
+import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User } from 'firebase/auth';
 
 // ... (Types are already there)
 
@@ -193,17 +195,8 @@ function Toast({ message, type, onClose }: { message: string, type: 'success' | 
 
 export default function App() {
   const [showMigration, setShowMigration] = useState(window.location.hash === '#migrate');
-
-  useEffect(() => {
-    const handleHash = () => setShowMigration(window.location.hash === '#migrate');
-    window.addEventListener('hashchange', handleHash);
-    return () => window.removeEventListener('hashchange', handleHash);
-  }, []);
-
-  if (showMigration) {
-    return <MigrationView onComplete={() => window.location.hash = ''} />;
-  }
-
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"clients" | "cats" | "stays" | "archives" | "stats" | "calendar" | "reports" | "contracts" | "settings">("stays");
   const [clients, setClients] = useState<Client[]>([]);
   const [cats, setCats] = useState<Cat[]>([]);
@@ -212,10 +205,7 @@ export default function App() {
   const [stats, setStats] = useState<any>(null);
   const [settings, setSettings] = useState<Settings>({});
   const [loading, setLoading] = useState(true);
-  
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
-
   const [confirmConfig, setConfirmConfig] = useState<{ 
     isOpen: boolean, 
     title: string, 
@@ -223,6 +213,22 @@ export default function App() {
     onConfirm: () => void,
     isDanger?: boolean
   }>({ isOpen: false, title: "", message: "", onConfirm: () => {} });
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const handleHash = () => setShowMigration(window.location.hash === '#migrate');
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
 
   const askConfirm = (title: string, message: string, onConfirm: () => void, isDanger = false) => {
     setConfirmConfig({ isOpen: true, title, message, onConfirm, isDanger });
@@ -249,12 +255,12 @@ export default function App() {
       const settingsData = await settingsRes.json();
       const statsData = await statsRes.json();
 
-      setClients(clientsData);
-      setCats(catsData);
-      setStays(staysData);
-      setArchivedStays(archivedStaysData);
-      setSettings(settingsData);
-      setStats(statsData);
+      if (Array.isArray(clientsData)) setClients(clientsData);
+      if (Array.isArray(catsData)) setCats(catsData);
+      if (Array.isArray(staysData)) setStays(staysData);
+      if (Array.isArray(archivedStaysData)) setArchivedStays(archivedStaysData);
+      if (settingsData && !settingsData.error) setSettings(settingsData);
+      if (statsData && !statsData.error) setStats(statsData);
     } catch (error) {
       console.error("Error fetching data:", error);
       showToast("Erreur lors de la récupération des données. Vérifiez votre connexion.", "error");
@@ -264,8 +270,63 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchData(true);
-  }, []);
+    if (currentUser && currentUser.email === 'fdeleflie@gmail.com') {
+      fetchData(true);
+    }
+  }, [currentUser]);
+
+  if (showMigration) {
+    return <MigrationView onComplete={() => window.location.hash = ''} />;
+  }
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-stone-50">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-stone-50 p-4">
+        <div className="max-w-md w-full bg-white p-8 rounded-3xl shadow-xl border border-stone-100 text-center space-y-6">
+          <div className="bg-indigo-50 w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-2">
+            <CatIcon size={40} className="text-indigo-600" />
+          </div>
+          <h1 className="text-2xl font-black text-stone-900 leading-tight">Accès Sécurisé - ChatHotel</h1>
+          <p className="text-stone-600 text-sm">Veuillez vous connecter avec votre compte administrateur pour accéder à la gestion de l'hôtel.</p>
+          <button 
+            onClick={() => signInWithPopup(auth, new GoogleAuthProvider())}
+            className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2"
+          >
+            Se connecter avec Google
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Check authorized email
+  const isAdmin = currentUser.email === 'fdeleflie@gmail.com';
+
+  if (!isAdmin) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-stone-50 p-4">
+        <div className="max-w-md w-full bg-white p-8 rounded-3xl shadow-xl border border-stone-100 text-center space-y-4">
+          <AlertCircle size={48} className="text-red-500 mx-auto" />
+          <h1 className="text-xl font-bold text-stone-900">Accès Refusé</h1>
+          <p className="text-stone-600">Désolé, votre adresse ({currentUser.email}) n'est pas autorisée à accéder à ce système.</p>
+          <button 
+            onClick={() => signOut(auth)}
+            className="w-full py-3 bg-stone-100 hover:bg-stone-200 text-stone-600 font-bold rounded-xl transition-all"
+          >
+            Se déconnecter
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -342,13 +403,20 @@ export default function App() {
             icon={<FileText size={20} className="text-indigo-500" />} 
             label="Contrats" 
           />
-          <div className="pt-4 mt-4 border-t border-stone-100">
+          <div className="pt-4 mt-4 border-t border-stone-100 flex flex-col gap-2">
             <NavItem 
               active={activeTab === "settings"} 
               onClick={() => setActiveTab("settings")} 
               icon={<SettingsIcon size={20} />} 
               label="Configuration" 
             />
+            <button 
+              onClick={() => signOut(auth)}
+              className="w-full flex items-center gap-3 px-4 py-2 text-sm font-bold text-red-600 hover:bg-red-50 rounded-xl transition-all"
+            >
+              <LogOut size={20} />
+              <span>Se déconnecter</span>
+            </button>
           </div>
         </nav>
 
@@ -2501,7 +2569,11 @@ function ReportsView({ stays, onUpdate, settings, showToast, askConfirm }: { sta
     if (reportTab === "health") {
       fetch(`/api/health-reports?archived=${showArchived}`)
         .then(res => res.json())
-        .then(data => setHealthReports(data));
+        .then(data => {
+          if (Array.isArray(data)) setHealthReports(data);
+          else setHealthReports([]);
+        })
+        .catch(() => setHealthReports([]));
     }
   }, [reportTab, stays, showArchived]);
 
