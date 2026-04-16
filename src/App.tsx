@@ -1,5 +1,5 @@
 export interface Client {
-  id: number;
+  id: string;
   name: string;
   address: string;
   email: string;
@@ -7,8 +7,8 @@ export interface Client {
 }
 
 export interface Cat {
-  id: number;
-  owner_id: number;
+  id: string;
+  owner_id: string;
   owner_name?: string;
   name: string;
   species: string;
@@ -21,8 +21,8 @@ export interface Cat {
 }
 
 export interface Stay {
-  id: number;
-  cat_id: number;
+  id: string;
+  cat_id: string;
   cat_name?: string;
   cat_species?: string;
   cat_breed?: string;
@@ -49,8 +49,8 @@ export interface Stay {
 }
 
 export interface HealthLog {
-  id: number;
-  stay_id: number;
+  id: string;
+  stay_id: string;
   date: string;
   ate_well: boolean;
   abnormal_behavior: boolean;
@@ -60,16 +60,16 @@ export interface HealthLog {
 }
 
 export interface Media {
-  id: number;
-  stay_id: number;
+  id: string;
+  stay_id: string;
   type: 'image' | 'video';
   url: string;
   filename: string;
 }
 
 export interface Invoice {
-  id: number;
-  stay_id: number;
+  id: string;
+  stay_id: string;
   amount: number;
   service_type: string;
   created_at: string;
@@ -475,7 +475,7 @@ function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToa
       }
     }
   }, [stays]);
-  const [formData, setFormData] = useState({ cat_id: 0, box_number: 1, arrival_date: format(new Date(), "yyyy-MM-dd"), planned_departure: "", comments: "" });
+  const [formData, setFormData] = useState({ cat_id: "", box_number: 1, arrival_date: format(new Date(), "yyyy-MM-dd"), planned_departure: "", comments: "" });
   const [status, setStatus] = useState("");
   const [filterMonth, setFilterMonth] = useState(format(new Date(), "yyyy-MM"));
 
@@ -484,7 +484,7 @@ function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToa
 
   const filteredStays = stays.filter(s => s.arrival_date.startsWith(filterMonth));
 
-  const isBoxAvailable = (box: number, arrival: string, departure: string, excludeStayId?: number) => {
+  const isBoxAvailable = (box: number, arrival: string, departure: string, excludeStayId?: string) => {
     return !stays.some(s => {
       if (s.id === excludeStayId) return false;
       if (s.box_number !== box) return false;
@@ -544,7 +544,7 @@ function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToa
     }
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     askConfirm(
       "Supprimer le séjour ?", 
       "ATTENTION: Cette action est irréversible. Supprimer définitivement ce séjour et toutes ses données associées (santé, factures, médias) ?",
@@ -648,7 +648,7 @@ function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToa
                 required
                 className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                 value={formData.cat_id}
-                onChange={e => setFormData({ ...formData, cat_id: parseInt(e.target.value) })}
+                onChange={e => setFormData({ ...formData, cat_id: e.target.value })}
               >
                 <option value="">Sélectionner un chat</option>
                 {cats.map(c => <option key={c.id} value={c.id}>{c.name} ({c.owner_name})</option>)}
@@ -834,7 +834,7 @@ function HealthSection({ stay, onUpdate, showToast, askConfirm }: { stay: Stay, 
     }
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     askConfirm(
       "Supprimer le suivi ?", 
       "Supprimer définitivement ce suivi de santé ?",
@@ -959,7 +959,7 @@ function MediaSection({ stay, showToast, askConfirm }: { stay: Stay, showToast: 
     onDrop(Array.from(e.target.files));
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     askConfirm(
       "Supprimer le média ?", 
       "Supprimer définitivement ce média ?",
@@ -1276,7 +1276,7 @@ function StayDetailsSection({ stay, onUpdate, settings, stays, showToast, askCon
   const totalBoxes = parseInt(settings.total_boxes || "3");
   const boxOptions = Array.from({ length: totalBoxes }, (_, i) => i + 1);
 
-  const isBoxAvailable = (box: number, arrival: string, departure: string, excludeStayId?: number) => {
+  const isBoxAvailable = (box: number, arrival: string, departure: string, excludeStayId?: string) => {
     return !stays.some(s => {
       if (s.id === excludeStayId) return false;
       if (s.box_number !== box) return false;
@@ -1289,7 +1289,7 @@ function StayDetailsSection({ stay, onUpdate, settings, stays, showToast, askCon
     });
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     askConfirm(
       "Supprimer le séjour ?", 
       "ATTENTION: Cette action est irréversible. Supprimer définitivement ce séjour et toutes ses données associées (santé, factures, médias) ?",
@@ -1527,7 +1527,7 @@ function ClientsView({ clients, onUpdate, showToast, askConfirm }: { clients: Cl
     }
   };
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     askConfirm(
       "Supprimer le client ?", 
       "ATTENTION: Supprimer un client supprimera également TOUS ses animaux et TOUS leurs séjours associés. Continuer ?",
@@ -1649,7 +1649,7 @@ function CatsView({ cats, clients, onUpdate, showToast, askConfirm }: { cats: Ca
   const [isAdding, setIsAdding] = useState(false);
   const [editingCat, setEditingCat] = useState<Cat | null>(null);
   const [formData, setFormData] = useState({ 
-    owner_id: 0, 
+    owner_id: "", 
     name: "", 
     species: "Chat", 
     breed: "", 
@@ -1662,7 +1662,7 @@ function CatsView({ cats, clients, onUpdate, showToast, askConfirm }: { cats: Ca
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     askConfirm(
       "Supprimer l'animal ?", 
       "ATTENTION: Supprimer cet animal supprimera également TOUS ses séjours associés. Continuer ?",
@@ -1745,7 +1745,7 @@ function CatsView({ cats, clients, onUpdate, showToast, askConfirm }: { cats: Ca
             onChange={e => setSearch(e.target.value)}
           />
           <button 
-            onClick={() => { setIsAdding(true); setEditingCat(null); setFormData({ owner_id: clients[0]?.id || 0, name: "", species: "Chat", breed: "", color: "", chip_number: "", vaccine_tc_date: "", vaccine_l_date: "", parasite_treatment_date: "" }); }}
+            onClick={() => { setIsAdding(true); setEditingCat(null); setFormData({ owner_id: clients[0]?.id || "", name: "", species: "Chat", breed: "", color: "", chip_number: "", vaccine_tc_date: "", vaccine_l_date: "", parasite_treatment_date: "" }); }}
             className="bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-emerald-700 transition-colors"
           >
             <Plus size={20} /> Nouveau
@@ -1769,7 +1769,7 @@ function CatsView({ cats, clients, onUpdate, showToast, askConfirm }: { cats: Ca
                   required
                   className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
                   value={formData.owner_id}
-                  onChange={e => setFormData({ ...formData, owner_id: parseInt(e.target.value) })}
+                  onChange={e => setFormData({ ...formData, owner_id: e.target.value })}
                 >
                   <option value="">Sélectionner un client</option>
                   {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -2547,7 +2547,7 @@ function ReportsView({ stays, onUpdate, settings, showToast, askConfirm }: { sta
   const [selectedStayForEdit, setSelectedStayForEdit] = useState<Stay | null>(null);
   const [healthReports, setHealthReports] = useState<any[]>([]);
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     askConfirm(
       "Supprimer le séjour ?", 
       "ATTENTION: Cette action est irréversible. Supprimer définitivement ce séjour et toutes ses données associées (santé, factures, médias) ?",
