@@ -2285,6 +2285,29 @@ function CalendarView({ stays, onUpdate, settings, showToast, askConfirm }: { st
     return stays.filter(s => s.box_number === box && s.arrival_date <= dateStr && (s.actual_departure || s.planned_departure) >= dateStr);
   };
 
+  const getBoxStyle = (boxNumber: number, isArchived: boolean) => {
+    if (isArchived) return 'bg-stone-100 text-stone-500';
+    const styles = [
+      'bg-emerald-100 text-emerald-700 hover:bg-emerald-200',
+      'bg-blue-100 text-blue-700 hover:bg-blue-200',
+      'bg-amber-100 text-amber-700 hover:bg-amber-200',
+      'bg-purple-100 text-purple-700 hover:bg-purple-200',
+      'bg-rose-100 text-rose-700 hover:bg-rose-200',
+      'bg-sky-100 text-sky-700 hover:bg-sky-200',
+      'bg-orange-100 text-orange-700 hover:bg-orange-200',
+      'bg-violet-100 text-violet-700 hover:bg-violet-200',
+    ];
+    return styles[(boxNumber - 1) % styles.length];
+  };
+
+  const getBoxSolidColor = (boxNumber: number) => {
+    const colors = [
+      'bg-emerald-500', 'bg-blue-500', 'bg-amber-500', 'bg-purple-500',
+      'bg-rose-500', 'bg-sky-500', 'bg-orange-500', 'bg-violet-500',
+    ];
+    return colors[(boxNumber - 1) % colors.length];
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -2330,7 +2353,7 @@ function CalendarView({ stays, onUpdate, settings, showToast, askConfirm }: { st
                         <button 
                           key={stay.id} 
                           onClick={() => setSelectedStay(stay)}
-                          className={`w-full text-left text-[10px] p-1 rounded font-bold truncate transition-colors ${stay.is_archived ? 'bg-stone-100 text-stone-500' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}
+                          className={`w-full text-left text-[10px] p-1 rounded font-bold truncate transition-colors ${getBoxStyle(stay.box_number, stay.is_archived)}`}
                         >
                           {stay.cat_name} (Box {stay.box_number})
                         </button>
@@ -2362,7 +2385,7 @@ function CalendarView({ stays, onUpdate, settings, showToast, askConfirm }: { st
                         <button 
                           key={stay.id}
                           onClick={() => setSelectedStay(stay)}
-                          className={`w-full h-full rounded text-[8px] p-0.5 font-bold truncate ${stay.is_archived ? 'bg-stone-100 text-stone-400' : 'bg-emerald-500 text-white'}`}
+                          className={`w-full h-full rounded text-[8px] p-0.5 font-bold truncate ${stay.is_archived ? 'bg-stone-100 text-stone-400' : `${getBoxSolidColor(stay.box_number)} text-white`}`}
                           title={`${stay.cat_name} (${stay.arrival_date} - ${stay.actual_departure || stay.planned_departure})`}
                         >
                           {stay.cat_name}
