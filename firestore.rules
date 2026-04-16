@@ -1,0 +1,25 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: clients
+    // Collection: cats
+    // Collection: stays
+    // Collection: health_logs
+    // Collection: settings
+
+    // Check if the user is authenticated and is the authorized admin
+    function isAuthorizedAdmin() {
+      return request.auth != null && 
+             request.auth.token.email_verified == true &&
+             (request.auth.token.email == 'fdeleflie@gmail.com');
+    }
+
+    match /{document=**} {
+      allow read, write: if isAuthorizedAdmin();
+    }
+  }
+}

@@ -125,6 +125,7 @@ const formatDateSafe = (dateString: string | undefined | null, fallback: string 
   return format(date, "dd/MM/yyyy");
 };
 import { useDropzone } from "react-dropzone";
+import { MigrationView } from "./MigrationView";
 
 // ... (Types are already there)
 
@@ -191,6 +192,18 @@ function Toast({ message, type, onClose }: { message: string, type: 'success' | 
 }
 
 export default function App() {
+  const [showMigration, setShowMigration] = useState(window.location.hash === '#migrate');
+
+  useEffect(() => {
+    const handleHash = () => setShowMigration(window.location.hash === '#migrate');
+    window.addEventListener('hashchange', handleHash);
+    return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
+  if (showMigration) {
+    return <MigrationView onComplete={() => window.location.hash = ''} />;
+  }
+
   const [activeTab, setActiveTab] = useState<"clients" | "cats" | "stays" | "archives" | "stats" | "calendar" | "reports" | "contracts" | "settings">("stays");
   const [clients, setClients] = useState<Client[]>([]);
   const [cats, setCats] = useState<Cat[]>([]);
@@ -1932,12 +1945,14 @@ function SettingsView({ settings, onUpdate, showToast, askConfirm }: { settings:
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(data)
             });
+            
+            if (!res.ok) {
+              const text = await res.text();
+              throw new Error(`Erreur serveur (${res.status}): ${text.substring(0, 100)}`);
+            }
+            
             const result = await res.json();
             if (result.logs) setRestoreLogs(result.logs);
-
-            if (!res.ok) {
-              throw new Error(result.error || "Erreur lors de la restauration");
-            }
             onUpdate();
             showToast("Restauration terminée avec succès !");
           } catch (err: any) {

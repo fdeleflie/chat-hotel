@@ -1,0 +1,93 @@
+{
+  "entities": {
+    "Client": {
+      "title": "Client",
+      "description": "A cat owner",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "Cat": {
+      "title": "Cat",
+      "description": "A cat",
+      "type": "object",
+      "properties": {
+        "owner_id": { "type": "string" },
+        "name": { "type": "string" },
+        "species": { "type": "string" },
+        "breed": { "type": "string" },
+        "color": { "type": "string" },
+        "chip_number": { "type": "string" },
+        "vaccine_tc_date": { "type": "string" },
+        "vaccine_l_date": { "type": "string" },
+        "parasite_treatment_date": { "type": "string" }
+      },
+      "required": ["owner_id", "name"]
+    },
+    "Stay": {
+      "title": "Stay",
+      "description": "A cat's stay in the hotel",
+      "type": "object",
+      "properties": {
+        "cat_id": { "type": "string" },
+        "box_number": { "type": "string" },
+        "arrival_date": { "type": "string" },
+        "planned_departure": { "type": "string" },
+        "actual_departure": { "type": "string", "nullable": true },
+        "comments": { "type": "string" },
+        "is_archived": { "type": "boolean" }
+      },
+      "required": ["cat_id", "box_number", "arrival_date", "planned_departure", "is_archived"]
+    },
+    "HealthLog": {
+      "title": "Health Log",
+      "description": "Health tracking for a stay",
+      "type": "object",
+      "properties": {
+        "stay_id": { "type": "string" },
+        "date": { "type": "string" },
+        "ate_well": { "type": "boolean" },
+        "abnormal_behavior": { "type": "boolean" },
+        "medication": { "type": "string" },
+        "incident": { "type": "string" },
+        "comments": { "type": "string" }
+      },
+      "required": ["stay_id", "date"]
+    },
+    "SystemSetting": {
+      "title": "Setting",
+      "description": "App settings",
+      "type": "object",
+      "properties": {
+        "value": { "type": "string", "description": "The setting value. Can be a URL" }
+      }
+    }
+  },
+  "firestore": {
+    "/clients/{clientId}": {
+      "schema": "Client",
+      "description": "Store clients"
+    },
+    "/cats/{catId}": {
+      "schema": "Cat",
+      "description": "Store cats"
+    },
+    "/stays/{stayId}": {
+      "schema": "Stay",
+      "description": "Store hotel stays"
+    },
+    "/health_logs/{logId}": {
+      "schema": "HealthLog",
+      "description": "Store health logs"
+    },
+    "/settings/{settingKey}": {
+      "schema": "SystemSetting",
+      "description": "Store settings like logo"
+    }
+  }
+}
