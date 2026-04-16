@@ -7,7 +7,20 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
   const method = init?.method || 'GET';
   const parsedUrl = new URL(url, window.location.origin);
   const path = parsedUrl.pathname; // /api/clients
-  const body = init?.body ? JSON.parse(init.body as string) : null;
+  let body: any = null;
+  
+  if (init?.body) {
+    if (typeof init.body === 'string') {
+      try {
+        body = JSON.parse(init.body);
+      } catch (e) {
+        body = init.body;
+      }
+    } else {
+      body = init.body;
+    }
+  }
+
   const searchParams = parsedUrl.searchParams;
 
   const jsonResponse = (data: any) => new Response(JSON.stringify(data), {
@@ -24,7 +37,23 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
         return jsonResponse(config);
       }
       if (method === 'POST') {
-        // Assume form data or JSON
+        // Handle Logo Upload (FormData)
+        if (init?.body instanceof FormData) {
+          const formData = init.body as FormData;
+          const logoFile = formData.get('logo') as File;
+          if (logoFile) {
+            const reader = new FileReader();
+            const base64 = await new Promise<string>((resolve, reject) => {
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(logoFile);
+            });
+            await setDoc(doc(db, 'settings', 'logo'), { value: base64 });
+            return jsonResponse({ success: true });
+          }
+        }
+
+        // Handle normal settings (JSON)
         if (body?.key) {
           await setDoc(doc(db, 'settings', body.key), { value: String(body.value) });
           return jsonResponse({ success: true });
@@ -274,8 +303,29 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
         await deleteDoc(doc(db, 'media', id));
         return jsonResponse({ success: true });
       }
-      // Note: POST to /api/media is hard to intercept with raw File/FormData via the basic interceptor without doing deeper FormData parsing, 
-      // but for basic functionality let's just let it return success or fail properly by throwing 500 if not mocked.
+      if (method === 'POST') {
+        const stayId = path.split('/').pop()!;
+        if (init?.body instanceof FormData) {
+          const formData = init.body as FormData;
+          const files = formData.getAll('media') as File[];
+          for (const file of files) {
+            const reader = new FileReader();
+            const base64 = await new Promise<string>((resolve, reject) => {
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(file);
+            });
+            await addDoc(collection(db, 'media'), {
+              stay_id: stayId,
+              type: file.type.startsWith('image') ? 'image' : 'video',
+              url: base64,
+              filename: file.name
+            });
+          }
+          return jsonResponse({ success: true });
+        }
+      }
+      // Note: POST to /api/media handled above for FormData case.
     }
 
     // Unmatched
