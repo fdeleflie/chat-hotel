@@ -1188,7 +1188,13 @@ function InvoiceSection({ stay, settings, showToast, askConfirm }: { stay: Stay,
 
       {isAdding || editingInvoice ? (
         <div className="bg-stone-50 p-4 rounded-xl space-y-3 border border-stone-200">
-          <input type="number" placeholder="Montant (€)" className="w-full p-2 text-sm border border-stone-200 rounded-lg" value={formData.amount} onChange={e => setFormData({ ...formData, amount: parseFloat(e.target.value) })} />
+          <input 
+            type="number" 
+            placeholder="Montant (€)" 
+            className="w-full p-2 text-sm border border-stone-200 rounded-lg" 
+            value={isNaN(formData.amount) ? "" : formData.amount} 
+            onChange={e => setFormData({ ...formData, amount: parseFloat(e.target.value) })} 
+          />
           <input placeholder="Type de prestation" className="w-full p-2 text-sm border border-stone-200 rounded-lg" value={formData.service_type} onChange={e => setFormData({ ...formData, service_type: e.target.value })} />
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
@@ -2156,7 +2162,7 @@ function SettingsView({ settings, onUpdate, showToast, askConfirm }: { settings:
               <input 
                 type="number" 
                 className="w-24 p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-                value={totalBoxes}
+                value={totalBoxes || ""}
                 onChange={e => setTotalBoxes(e.target.value)}
               />
               <button 
@@ -2463,7 +2469,7 @@ function StatsView({ stats }: { stats: any }) {
               <input 
                 type="number" 
                 className="p-2 border border-stone-200 rounded-lg text-sm w-24"
-                value={selectedYear}
+                value={isNaN(selectedYear) ? "" : selectedYear}
                 onChange={e => setSelectedYear(parseInt(e.target.value))}
               />
             </div>
@@ -2473,7 +2479,7 @@ function StatsView({ stats }: { stats: any }) {
             <input 
               type="number" 
               className="p-2 border border-stone-200 rounded-lg text-sm w-24"
-              value={selectedYear}
+              value={isNaN(selectedYear) ? "" : selectedYear}
               onChange={e => setSelectedYear(parseInt(e.target.value))}
             />
           )}

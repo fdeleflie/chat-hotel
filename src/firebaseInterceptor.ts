@@ -328,6 +328,41 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
       // Note: POST to /api/media handled above for FormData case.
     }
 
+    // --- BACKUP ---
+    if (path === '/api/backup') {
+      const full = searchParams.get('full') === 'true';
+      const collections = ['clients', 'cats', 'stays', 'health_logs', 'invoices', 'settings'];
+      if (full) collections.push('media');
+      
+      const backupData: any = {};
+      for (const col of collections) {
+        const snap = await getDocs(collection(db, col));
+        backupData[col] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      }
+      return jsonResponse(backupData);
+    }
+
+    // --- RESTORE ---
+    if (path === '/api/restore') {
+      if (method === 'POST') {
+        const logs: string[] = ["Démarrage de la restauration Cloud..."];
+        const collections = ['clients', 'cats', 'stays', 'health_logs', 'invoices', 'settings', 'media'];
+        
+        for (const col of collections) {
+          if (body[col] && Array.isArray(body[col])) {
+            logs.push(`Injection de ${body[col].length} entrées dans ${col}...`);
+            for (const item of body[col]) {
+              const { id, ...data } = item;
+              // On utilise setDoc pour préserver les IDs et maintenir les relations (très important)
+              await setDoc(doc(db, col, id.toString()), data);
+            }
+          }
+        }
+        logs.push("Importation terminée avec succès.");
+        return jsonResponse({ success: true, logs });
+      }
+    }
+
     // Unmatched
     console.log("Unhandled Firebase Intercept:", method, path);
     return new Response(JSON.stringify({ error: 'Not implemented in Firebase mock' }), { status: 404 });
