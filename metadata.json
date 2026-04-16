@@ -1,0 +1,5 @@
+{
+  "name": "Chat'Hotel",
+  "description": "Système de gestion pour hôtel félin (pension pour chats)",
+  "requestFramePermissions": ["camera"]
+}
