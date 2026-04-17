@@ -112,7 +112,8 @@ import {
   CheckCircle2,
   AlertCircle,
   LogOut,
-  Camera
+  Camera,
+  Menu
 } from "lucide-react";
 import { format, isValid } from "date-fns";
 import { jsPDF } from "jspdf";
@@ -198,6 +199,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"clients" | "cats" | "stays" | "archives" | "stats" | "calendar" | "reports" | "contracts" | "settings">("stays");
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [cats, setCats] = useState<Cat[]>([]);
   const [stays, setStays] = useState<Stay[]>([]);
@@ -352,10 +354,35 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-stone-50 text-stone-900 font-sans">
+    <div className="min-h-screen bg-stone-50 text-stone-900 font-sans tracking-tight">
+      {/* Mobile Header */}
+      <div className="lg:hidden bg-white border-b border-stone-200 px-4 py-3 flex items-center justify-between sticky top-0 z-50">
+        <div className="flex items-center gap-2">
+          {settings.logo ? (
+            <img src={settings.logo} alt="Logo" className="w-8 h-8 rounded object-cover" referrerPolicy="no-referrer" />
+          ) : (
+            <div className="w-8 h-8 bg-emerald-100 text-emerald-600 rounded flex items-center justify-center">
+              <CatIcon size={16} />
+            </div>
+          )}
+          <span className="font-bold text-lg tracking-tight">Chat'Hotel</span>
+        </div>
+        <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-2 hover:bg-stone-100 rounded-lg text-stone-600">
+          {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
+        </button>
+      </div>
+
+      {/* Sidebar Overlay */}
+      {isMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60] lg:hidden" 
+          onClick={() => setIsMenuOpen(false)} 
+        />
+      )}
+
       {/* Sidebar */}
-      <div className="fixed left-0 top-0 h-full w-64 bg-white border-r border-stone-200 flex flex-col">
-        <div className="p-6 border-bottom border-stone-100 flex items-center gap-3">
+      <div className={`fixed left-0 top-0 h-full w-64 bg-white border-r border-stone-200 flex flex-col z-[70] transition-transform duration-300 lg:translate-x-0 ${isMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="p-6 border-b border-stone-100 hidden lg:flex items-center gap-3">
           {settings.logo ? (
             <img src={settings.logo} alt="Logo" className="w-10 h-10 rounded-lg object-cover" referrerPolicy="no-referrer" />
           ) : (
@@ -369,56 +396,56 @@ export default function App() {
         <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
           <NavItem 
             active={activeTab === "stays"} 
-            onClick={() => setActiveTab("stays")} 
+            onClick={() => { setActiveTab("stays"); setIsMenuOpen(false); }} 
             icon={<Calendar size={20} />} 
             label="Séjours" 
           />
           <NavItem 
             active={activeTab === "calendar"} 
-            onClick={() => setActiveTab("calendar")} 
+            onClick={() => { setActiveTab("calendar"); setIsMenuOpen(false); }} 
             icon={<Calendar size={20} className="text-blue-500" />} 
             label="Calendrier" 
           />
           <NavItem 
             active={activeTab === "archives"} 
-            onClick={() => setActiveTab("archives")} 
+            onClick={() => { setActiveTab("archives"); setIsMenuOpen(false); }} 
             icon={<LogOut size={20} className="text-stone-400" />} 
             label="Archives" 
           />
           <NavItem 
             active={activeTab === "clients"} 
-            onClick={() => setActiveTab("clients")} 
+            onClick={() => { setActiveTab("clients"); setIsMenuOpen(false); }} 
             icon={<Users size={20} />} 
             label="Clients" 
           />
           <NavItem 
             active={activeTab === "cats"} 
-            onClick={() => setActiveTab("cats")} 
+            onClick={() => { setActiveTab("cats"); setIsMenuOpen(false); }} 
             icon={<CatIcon size={20} />} 
             label="Animaux" 
           />
           <NavItem 
             active={activeTab === "stats"} 
-            onClick={() => setActiveTab("stats")} 
+            onClick={() => { setActiveTab("stats"); setIsMenuOpen(false); }} 
             icon={<FileText size={20} className="text-orange-500" />} 
             label="Statistiques" 
           />
           <NavItem 
             active={activeTab === "reports"} 
-            onClick={() => setActiveTab("reports")} 
+            onClick={() => { setActiveTab("reports"); setIsMenuOpen(false); }} 
             icon={<FileText size={20} className="text-purple-500" />} 
             label="Rapports" 
           />
           <NavItem 
             active={activeTab === "contracts"} 
-            onClick={() => setActiveTab("contracts")} 
+            onClick={() => { setActiveTab("contracts"); setIsMenuOpen(false); }} 
             icon={<FileText size={20} className="text-indigo-500" />} 
             label="Contrats" 
           />
           <div className="pt-4 mt-4 border-t border-stone-100 flex flex-col gap-2">
             <NavItem 
               active={activeTab === "settings"} 
-              onClick={() => setActiveTab("settings")} 
+              onClick={() => { setActiveTab("settings"); setIsMenuOpen(false); }} 
               icon={<SettingsIcon size={20} />} 
               label="Configuration" 
             />
@@ -444,13 +471,13 @@ export default function App() {
             className="w-full mt-3 flex items-center justify-center gap-2 px-4 py-2 text-[10px] font-bold text-stone-400 hover:text-stone-600 transition-colors border border-stone-100 rounded-lg"
           >
             <CheckCircle2 size={10} />
-            <span>Version 1.0.2 - Forcer l'actualisation</span>
+            <span>Version 1.0.3 - Forcer l'actualisation</span>
           </button>
         </div>
       </div>
 
       {/* Main Content */}
-      <main className="ml-64 p-8">
+      <main className="lg:ml-64 p-4 lg:p-8 transition-all duration-300">
         {activeTab === "stays" && <StaysView stays={stays} cats={cats} onUpdate={fetchData} settings={settings} showToast={showToast} askConfirm={askConfirm} />}
         {activeTab === "archives" && <StaysView stays={archivedStays} cats={cats} onUpdate={fetchData} isArchive settings={settings} showToast={showToast} askConfirm={askConfirm} />}
         {activeTab === "calendar" && <CalendarView stays={[...stays, ...archivedStays]} onUpdate={fetchData} settings={settings} showToast={showToast} askConfirm={askConfirm} />}
@@ -625,21 +652,21 @@ function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToa
         </section>
       )}
 
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h2 className="text-2xl font-bold">{isArchive ? "Archives des Séjours" : "Suivi des Séjours"}</h2>
-        <div className="flex gap-4">
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
           <input 
             type="month" 
-            className="p-2 border border-stone-200 rounded-lg text-sm" 
+            className="flex-1 sm:flex-initial p-2 border border-stone-200 rounded-lg text-sm" 
             value={filterMonth} 
             onChange={e => setFilterMonth(e.target.value)} 
           />
           {!isArchive && (
             <button 
-              onClick={() => { setIsAdding(true); setFormData({ ...formData, cat_id: cats[0]?.id || 0 }); }}
-              className="bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-emerald-700 transition-colors"
+              onClick={() => { setIsAdding(true); setFormData({ ...formData, cat_id: cats[0]?.id || "" }); }}
+              className="flex-1 sm:flex-initial bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors text-sm font-bold"
             >
-              <Plus size={20} /> Nouveau Séjour
+              <Plus size={18} /> Nouveau Séjour
             </button>
           )}
         </div>
@@ -653,7 +680,7 @@ function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToa
 
       {isAdding && (
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-200">
-          <form onSubmit={onFormSubmit} className="grid grid-cols-2 gap-4">
+          <form onSubmit={onFormSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1">
               <label className="text-xs font-semibold text-stone-500 uppercase">Chat</label>
               <select 
@@ -884,7 +911,7 @@ function HealthSection({ stay, onUpdate, showToast, askConfirm }: { stay: Stay, 
 
       {isAdding || editingLog ? (
         <div className="bg-stone-50 p-4 rounded-xl space-y-3 border border-stone-200">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="flex items-center gap-2">
               <input type="checkbox" checked={formData.ate_well} onChange={e => setFormData({ ...formData, ate_well: e.target.checked })} />
               <label className="text-sm">A bien mangé</label>
@@ -1004,7 +1031,7 @@ function MediaSection({ stay, showToast, askConfirm }: { stay: Stay, showToast: 
         {uploading && <p className="text-xs text-emerald-600 font-bold mt-2">Téléchargement...</p>}
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         {media.map(m => (
           <div key={m.id} className="relative aspect-square group rounded-lg overflow-hidden border border-stone-200">
             {m.type === 'image' ? (
@@ -1208,7 +1235,7 @@ function InvoiceSection({ stay, settings, showToast, askConfirm }: { stay: Stay,
             onChange={e => setFormData({ ...formData, amount: parseFloat(e.target.value) })} 
           />
           <input placeholder="Type de prestation" className="w-full p-2 text-sm border border-stone-200 rounded-lg" value={formData.service_type} onChange={e => setFormData({ ...formData, service_type: e.target.value })} />
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div className="space-y-1">
               <label className="text-[10px] font-bold text-stone-400 uppercase">Entrée</label>
               <input type="date" className="w-full p-2 text-sm border border-stone-200 rounded-lg" value={formData.arrival_date} onChange={e => setFormData({ ...formData, arrival_date: e.target.value })} />
@@ -1403,7 +1430,7 @@ function StayDetailsSection({ stay, onUpdate, settings, stays, showToast, askCon
           <h5 className="text-xs font-bold text-emerald-700 uppercase mb-3 flex items-center gap-2">
             <HeartPulse size={14} /> Dernier Suivi Santé
           </h5>
-          <div className="grid grid-cols-2 gap-4 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
             <div className="flex items-center gap-2">
               <input 
                 type="checkbox" 
@@ -1562,20 +1589,20 @@ function ClientsView({ clients, onUpdate, showToast, askConfirm }: { clients: Cl
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h2 className="text-2xl font-bold">Gestion des Clients</h2>
-        <div className="flex gap-4">
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
           <input 
             placeholder="Rechercher un client..." 
-            className="p-2 border border-stone-200 rounded-lg text-sm w-64"
+            className="p-2 border border-stone-200 rounded-lg text-sm w-full sm:w-48"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
           <button 
             onClick={() => { setIsAdding(true); setEditingClient(null); setFormData({ name: "", address: "", email: "", phone: "" }); }}
-            className="bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-emerald-700 transition-colors"
+            className="bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors text-sm font-bold"
           >
-            <Plus size={20} /> Nouveau Client
+            <Plus size={18} /> Nouveau Client
           </button>
         </div>
       </div>
@@ -1588,7 +1615,7 @@ function ClientsView({ clients, onUpdate, showToast, askConfirm }: { clients: Cl
 
       {(isAdding || editingClient) && (
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-200">
-          <form onSubmit={onFormSubmit} className="grid grid-cols-2 gap-4">
+          <form onSubmit={onFormSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1">
               <label className="text-xs font-semibold text-stone-500 uppercase">Nom Complet</label>
               <input 
@@ -1747,20 +1774,20 @@ function CatsView({ cats, clients, onUpdate, showToast, askConfirm }: { cats: Ca
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h2 className="text-2xl font-bold">Registre des Animaux</h2>
-        <div className="flex gap-4">
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
           <input 
             placeholder="Rechercher un animal..." 
-            className="p-2 border border-stone-200 rounded-lg text-sm w-64"
+            className="p-2 border border-stone-200 rounded-lg text-sm w-full sm:w-48"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
           <button 
             onClick={() => { setIsAdding(true); setEditingCat(null); setFormData({ owner_id: clients[0]?.id || "", name: "", species: "Chat", breed: "", color: "", chip_number: "", vaccine_tc_date: "", vaccine_l_date: "", parasite_treatment_date: "" }); }}
-            className="bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-emerald-700 transition-colors"
+            className="bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors text-sm font-bold"
           >
-            <Plus size={20} /> Nouveau
+            <Plus size={18} /> Nouveau
           </button>
         </div>
       </div>
@@ -1773,7 +1800,7 @@ function CatsView({ cats, clients, onUpdate, showToast, askConfirm }: { cats: Ca
 
       {(isAdding || editingCat) && (
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-200">
-          <form onSubmit={onFormSubmit} className="grid grid-cols-2 gap-4">
+          <form onSubmit={onFormSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {!editingCat && (
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-stone-500 uppercase">Propriétaire</label>
@@ -1892,14 +1919,14 @@ function CatsView({ cats, clients, onUpdate, showToast, askConfirm }: { cats: Ca
                 <button onClick={() => handleDelete(cat.id)} className="p-2 text-stone-300 hover:text-red-600"><Trash2 size={18} /></button>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4 text-sm mt-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm mt-4">
               <div><span className="text-stone-400 block text-[10px] uppercase font-bold">Race</span> {cat.breed || "-"}</div>
               <div><span className="text-stone-400 block text-[10px] uppercase font-bold">Couleur</span> {cat.color || "-"}</div>
               <div className="col-span-2"><span className="text-stone-400 block text-[10px] uppercase font-bold">Puce</span> {cat.chip_number || "-"}</div>
               
               <div className="col-span-2 pt-2 border-t border-stone-100">
                 <span className="text-stone-400 block text-[10px] uppercase font-bold mb-1">Santé</span>
-                <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                   <div><span className="text-stone-500">Vaccins TC:</span> {formatDateSafe(cat.vaccine_tc_date)}</div>
                   <div><span className="text-stone-500">Leucose L:</span> {formatDateSafe(cat.vaccine_l_date)}</div>
                   <div className="col-span-2"><span className="text-stone-500">Parasitaire:</span> {formatDateSafe(cat.parasite_treatment_date)}</div>
@@ -2348,8 +2375,9 @@ function CalendarView({ stays, onUpdate, settings, showToast, askConfirm }: { st
       </div>
 
       {viewMode === "global" ? (
-        <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
-          <div className="grid grid-cols-7 bg-stone-50 border-b border-stone-200">
+        <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-x-auto">
+          <div className="min-w-[800px]">
+            <div className="grid grid-cols-7 bg-stone-50 border-b border-stone-200">
             {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map(d => (
               <div key={d} className="p-3 text-center text-xs font-bold text-stone-400 uppercase">{d}</div>
             ))}
@@ -2377,6 +2405,7 @@ function CalendarView({ stays, onUpdate, settings, showToast, askConfirm }: { st
             ))}
           </div>
         </div>
+      </div>
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-x-auto">
           <div className="min-w-[1200px]">
@@ -2696,63 +2725,59 @@ function ReportsView({ stays, onUpdate, settings, showToast, askConfirm }: { sta
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4">
         <h2 className="text-2xl font-bold">Rapports & Registres</h2>
-        <div className="flex gap-4">
+        <div className="flex flex-wrap gap-2 w-full xl:w-auto">
           <button 
             onClick={reportTab === "register" ? generateRegisterPDF : generateHealthReportPDF}
-            className="bg-stone-800 text-white px-4 py-2 rounded-lg flex items-center gap-2 hover:bg-stone-900 transition-colors text-sm font-bold"
+            className="flex-1 sm:flex-initial bg-stone-800 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-stone-900 transition-colors text-sm font-bold"
           >
-            <FileText size={18} /> Imprimer le rapport
+            <FileText size={18} /> Imprimer
           </button>
-          <div className="flex items-center gap-2 bg-stone-100 p-1 rounded-lg">
+          <div className="flex items-center gap-2 bg-stone-100 p-1 rounded-lg flex-1 sm:flex-initial">
             <button 
               onClick={() => setShowArchived(false)}
-              className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${!showArchived ? "bg-white text-emerald-600 shadow-sm" : "text-stone-500"}`}
+              className={`flex-1 px-3 py-1 rounded-md text-xs font-bold transition-all ${!showArchived ? "bg-white text-emerald-600 shadow-sm" : "text-stone-500"}`}
             >
               Actifs
             </button>
             <button 
               onClick={() => setShowArchived(true)}
-              className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${showArchived ? "bg-white text-emerald-600 shadow-sm" : "text-stone-500"}`}
+              className={`flex-1 px-3 py-1 rounded-md text-xs font-bold transition-all ${showArchived ? "bg-white text-emerald-600 shadow-sm" : "text-stone-500"}`}
             >
               Archivés
             </button>
           </div>
           {reportTab === "register" && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-stone-400 uppercase">Mois:</span>
+            <div className="flex items-center gap-2 flex-1 sm:flex-initial">
               <input 
                 type="month" 
-                className="p-2 border border-stone-200 rounded-lg text-sm" 
+                className="w-full p-2 border border-stone-200 rounded-lg text-sm" 
                 value={filterDate} 
                 onChange={e => setFilterDate(e.target.value)} 
               />
-              {filterDate && (
-                <button onClick={() => setFilterDate("")} className="text-xs text-stone-400 hover:text-red-500 font-bold">Effacer</button>
-              )}
             </div>
           )}
           <input 
             type="text" 
             placeholder="Rechercher..." 
-            className="p-2 border border-stone-200 rounded-lg text-sm" 
+            className="flex-1 sm:flex-initial p-2 border border-stone-200 rounded-lg text-sm min-w-0" 
             value={searchTerm} 
             onChange={e => setSearchTerm(e.target.value)} 
           />
         </div>
       </div>
 
-      <div className="flex border-b border-stone-200">
+      <div className="flex flex-col sm:flex-row border-b border-stone-200">
         <button 
           onClick={() => setReportTab("register")}
-          className={`px-6 py-3 font-bold text-sm transition-colors border-b-2 ${reportTab === "register" ? "border-emerald-500 text-emerald-600" : "border-transparent text-stone-400 hover:text-stone-600"}`}
+          className={`flex-1 px-6 py-3 font-bold text-sm transition-colors border-b-2 ${reportTab === "register" ? "border-emerald-500 text-emerald-600" : "border-transparent text-stone-400 hover:text-stone-600"}`}
         >
           Registre Entrées/Sorties
         </button>
         <button 
           onClick={() => setReportTab("health")}
-          className={`px-6 py-3 font-bold text-sm transition-colors border-b-2 ${reportTab === "health" ? "border-emerald-500 text-emerald-600" : "border-transparent text-stone-400 hover:text-stone-600"}`}
+          className={`flex-1 px-6 py-3 font-bold text-sm transition-colors border-b-2 ${reportTab === "health" ? "border-emerald-500 text-emerald-600" : "border-transparent text-stone-400 hover:text-stone-600"}`}
         >
           Suivi de Santé Global
         </button>
@@ -3021,19 +3046,19 @@ function ContractsView({ stays, settings }: { stays: Stay[], settings: Settings 
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h2 className="text-2xl font-bold">Contrats</h2>
         <input 
           type="text" 
           placeholder="Rechercher un séjour..." 
-          className="p-2 border border-stone-200 rounded-lg text-sm w-64" 
+          className="p-2 border border-stone-200 rounded-lg text-sm w-full sm:w-64" 
           value={searchTerm} 
           onChange={e => setSearchTerm(e.target.value)} 
         />
       </div>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-hidden">
-        <table className="w-full text-left border-collapse">
+      <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-x-auto">
+        <table className="w-full text-left border-collapse min-w-[600px]">
           <thead>
             <tr className="bg-stone-50 border-b border-stone-200">
               <th className="p-4 text-xs font-bold text-stone-400 uppercase">ID</th>
