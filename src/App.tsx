@@ -275,39 +275,46 @@ export default function App() {
     }
   }, [currentUser]);
 
-  if (showMigration) {
-    return <MigrationView onComplete={() => window.location.hash = ''} />;
-  }
-
+  // 1. Loader pendant la vérification initiale de l'auth
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-stone-50">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-stone-500 font-medium">Vérification de l'accès...</p>
+        </div>
       </div>
     );
   }
 
+  // 2. Si non connecté, écran de login uniquement
   if (!currentUser) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-stone-50 p-4">
-        <div className="max-w-md w-full bg-white p-8 rounded-3xl shadow-xl border border-stone-100 text-center space-y-6">
-          <div className="bg-indigo-50 w-20 h-20 rounded-2xl flex items-center justify-center mx-auto mb-2">
-            <CatIcon size={40} className="text-indigo-600" />
+      <div className="min-h-screen flex items-center justify-center bg-stone-50 p-4 font-sans">
+        <div className="max-w-md w-full bg-white p-10 rounded-3xl shadow-2xl border border-stone-100 text-center space-y-8">
+          <div className="bg-indigo-600 w-24 h-24 rounded-3xl flex items-center justify-center mx-auto shadow-xl rotate-3">
+            <CatIcon size={48} className="text-white -rotate-3" />
           </div>
-          <h1 className="text-2xl font-black text-stone-900 leading-tight">Accès Sécurisé - ChatHotel</h1>
-          <p className="text-stone-600 text-sm">Veuillez vous connecter avec votre compte administrateur pour accéder à la gestion de l'hôtel.</p>
+          <div className="space-y-2">
+            <h1 className="text-3xl font-black text-stone-900 tracking-tight">ChatHotel</h1>
+            <p className="text-stone-500 text-sm font-medium">Système de Gestion Sécurisé</p>
+          </div>
+          <div className="p-4 bg-stone-50 rounded-2xl text-xs text-stone-500 leading-relaxed italic">
+            "Cet accès est strictement réservé au personnel autorisé. Toute tentative de connexion non autorisée est enregistrée."
+          </div>
           <button 
             onClick={() => signInWithPopup(auth, new GoogleAuthProvider())}
-            className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2"
+            className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl transition-all shadow-lg shadow-indigo-200 flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-95"
           >
-            Se connecter avec Google
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5 bg-white rounded-full p-0.5" />
+            S'identifier avec Google
           </button>
         </div>
       </div>
     );
   }
 
-  // Check authorized email
+  // 3. Vérification de l'email autorisé
   const isAdmin = currentUser.email === 'fdeleflie@gmail.com';
 
   if (!isAdmin) {
@@ -326,6 +333,11 @@ export default function App() {
         </div>
       </div>
     );
+  }
+
+  // 4. Si admin, on peut montrer l'outil de migration si demandé, sinon l'app principale
+  if (showMigration) {
+    return <MigrationView onComplete={() => window.location.hash = ''} />;
   }
 
   if (loading) {
