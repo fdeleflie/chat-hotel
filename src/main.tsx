@@ -19,17 +19,8 @@ try {
             ? resource.url 
             : String(resource);
         
-        const method = config?.method || 'GET';
-        const isBackup = url.includes('/api/backup');
-        const isRestoringToFirebase = window.location.hash === '#migrate';
-
-        // Si on est en train de migrer (#migrate), on laisse passer le GET /api/backup pour qu'il touche le vrai serveur local (SQLite).
-        if (isBackup && isRestoringToFirebase && method === 'GET') {
-          return originalFetch(...args);
-        }
-        
         if (url.startsWith('/api/') || url.includes('/api/')) {
-          console.log("Intercepting fetch to:", url);
+          console.log("Intercepting fetch to Firebase:", url);
           return handleFirebaseApi(url, config);
         }
         

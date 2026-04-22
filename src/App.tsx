@@ -628,7 +628,13 @@ function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToa
             {upcomingStays.slice(0, 6).map(stay => (
               <div 
                 key={stay.id} 
-                onClick={() => setSelectedStay(stay)}
+                onClick={() => {
+                  setFilterMonth(stay.arrival_date.substring(0, 7));
+                  setSelectedStay(stay);
+                  setTimeout(() => {
+                    document.getElementById(`stay-card-${stay.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  }, 100);
+                }}
                 className="bg-white p-4 rounded-xl shadow-sm border border-emerald-100 flex flex-col gap-2 cursor-pointer hover:border-emerald-300 hover:shadow-md transition-all"
               >
                 <div className="flex justify-between items-start">
@@ -751,7 +757,7 @@ function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToa
 
       <div className="grid grid-cols-1 gap-4">
         {filteredStays.map(stay => (
-          <div key={stay.id} className={`bg-white p-5 rounded-2xl shadow-sm border transition-all ${selectedStay?.id === stay.id ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-stone-200'}`}>
+          <div key={stay.id} id={`stay-card-${stay.id}`} className={`bg-white p-5 rounded-2xl shadow-sm border transition-all ${selectedStay?.id === stay.id ? 'border-emerald-500 ring-1 ring-emerald-500' : 'border-stone-200'}`}>
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center font-bold">
@@ -1397,7 +1403,25 @@ function StayDetailsSection({ stay, onUpdate, settings, stays, showToast, askCon
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="text-[10px] font-bold text-stone-400 uppercase">Arrivée</label>
+          <input 
+            type="date"
+            className="w-full p-2 text-sm border border-stone-200 rounded-lg"
+            value={formData.arrival_date || ""}
+            onChange={e => setFormData({ ...formData, arrival_date: e.target.value })}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] font-bold text-stone-400 uppercase">Départ Prévu</label>
+          <input 
+            type="date"
+            className="w-full p-2 text-sm border border-stone-200 rounded-lg"
+            value={formData.planned_departure || ""}
+            onChange={e => setFormData({ ...formData, planned_departure: e.target.value })}
+          />
+        </div>
         <div className="space-y-1">
           <label className="text-[10px] font-bold text-stone-400 uppercase">Départ Réel</label>
           <input 
@@ -1417,7 +1441,7 @@ function StayDetailsSection({ stay, onUpdate, settings, stays, showToast, askCon
             {boxOptions.map(box => <option key={box} value={box}>Box {box}</option>)}
           </select>
         </div>
-        <div className="col-span-2 space-y-1">
+        <div className="col-span-1 sm:col-span-2 space-y-1">
           <label className="text-[10px] font-bold text-stone-400 uppercase">Commentaires Généraux</label>
           <textarea 
             className="w-full p-2 text-sm border border-stone-200 rounded-lg h-20"
@@ -1426,7 +1450,7 @@ function StayDetailsSection({ stay, onUpdate, settings, stays, showToast, askCon
           />
         </div>
 
-        <div className="col-span-2 pt-4 border-t border-stone-100">
+        <div className="col-span-1 sm:col-span-2 pt-4 border-t border-stone-100">
           <h5 className="text-xs font-bold text-emerald-700 uppercase mb-3 flex items-center gap-2">
             <HeartPulse size={14} /> Dernier Suivi Santé
           </h5>

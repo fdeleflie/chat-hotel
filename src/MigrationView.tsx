@@ -62,6 +62,20 @@ export function MigrationView({ onComplete }: { onComplete: () => void }) {
           await setDoc(doc(db, 'health_logs', hl.id.toString()), hl);
         }
       }
+
+      if (data.invoices && data.invoices.length > 0) {
+        log("Migration des factures...");
+        for (const inv of data.invoices) {
+          await setDoc(doc(db, 'invoices', inv.id.toString()), inv);
+        }
+      }
+
+      if (data.media && data.media.length > 0) {
+        log("Migration des médias...");
+        for (const m of data.media) {
+          await setDoc(doc(db, 'media', m.id.toString()), m);
+        }
+      }
       
       log("MIGRATION TERMINÉE AVEC SUCCÈS ! Vous pouvez me prévenir.");
     } catch (err: any) {
@@ -111,7 +125,7 @@ export function MigrationView({ onComplete }: { onComplete: () => void }) {
           onClick={onComplete}
           className="text-stone-500 hover:text-stone-900 underline text-sm block mx-auto pt-4"
         >
-          Retour à l'application sans migrer (Test)
+          Retourner au menu principal
         </button>
       </div>
     </div>
