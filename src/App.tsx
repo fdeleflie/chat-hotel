@@ -18,6 +18,8 @@ export interface Cat {
   vaccine_tc_date?: string;
   vaccine_l_date?: string;
   parasite_treatment_date?: string;
+  birth_date?: string;
+  age?: string;
 }
 
 export interface Stay {
@@ -31,6 +33,8 @@ export interface Stay {
   cat_vaccine_tc_date?: string;
   cat_vaccine_l_date?: string;
   cat_parasite_treatment_date?: string;
+  cat_birth_date?: string;
+  cat_age?: string;
   owner_name?: string;
   owner_email?: string;
   owner_address?: string;
@@ -124,6 +128,28 @@ const formatDateSafe = (dateString: string | undefined | null, fallback: string 
   const date = new Date(dateString);
   if (!isValid(date)) return fallback;
   return format(date, "dd/MM/yyyy");
+};
+
+const calculateAge = (birthDate: string): string => {
+  if (!birthDate) return "";
+  const birth = new Date(birthDate);
+  const now = new Date();
+  let years = now.getFullYear() - birth.getFullYear();
+  let months = now.getMonth() - birth.getMonth();
+  if (months < 0 || (months === 0 && now.getDate() < birth.getDate())) {
+    years--;
+    months += 12;
+  }
+  if (now.getDate() < birth.getDate()) {
+    months--;
+  }
+  if (years > 0) {
+    return `${years} an${years > 1 ? 's' : ''}${months > 0 ? ` ${months} mois` : ''}`;
+  } else if (months > 0) {
+    return `${months} mois`;
+  } else {
+    return "< 1 mois";
+  }
 };
 import { useDropzone } from "react-dropzone";
 import { MigrationView } from "./MigrationView";
@@ -481,7 +507,7 @@ export default function App() {
         {activeTab === "stays" && <StaysView stays={stays} cats={cats} onUpdate={fetchData} settings={settings} showToast={showToast} askConfirm={askConfirm} />}
         {activeTab === "archives" && <StaysView stays={archivedStays} cats={cats} onUpdate={fetchData} isArchive settings={settings} showToast={showToast} askConfirm={askConfirm} />}
         {activeTab === "calendar" && <CalendarView stays={[...stays, ...archivedStays]} onUpdate={fetchData} settings={settings} showToast={showToast} askConfirm={askConfirm} />}
-        {activeTab === "clients" && <ClientsView clients={clients} onUpdate={fetchData} showToast={showToast} askConfirm={askConfirm} />}
+        {activeTab === "clients" && <ClientsView clients={clients} cats={cats} stays={stays} settings={settings} onUpdate={fetchData} showToast={showToast} askConfirm={askConfirm} />}
         {activeTab === "cats" && <CatsView cats={cats} clients={clients} onUpdate={fetchData} showToast={showToast} askConfirm={askConfirm} />}
         {activeTab === "stats" && <StatsView stats={stats} />}
         {activeTab === "reports" && <ReportsView stays={[...stays, ...archivedStays]} onUpdate={fetchData} settings={settings} showToast={showToast} askConfirm={askConfirm} />}
@@ -638,7 +664,10 @@ function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToa
                 className="bg-white p-4 rounded-xl shadow-sm border border-emerald-100 flex flex-col gap-2 cursor-pointer hover:border-emerald-300 hover:shadow-md transition-all"
               >
                 <div className="flex justify-between items-start">
-                  <span className="font-bold text-stone-900">{stay.cat_name}</span>
+                  <div className="flex flex-col">
+                    <span className="font-bold text-stone-900">{stay.cat_name}</span>
+                    {(stay.cat_age || stay.cat_birth_date) && <span className="text-[10px] text-stone-500 uppercase">{stay.cat_age || calculateAge(stay.cat_birth_date || "")}</span>}
+                  </div>
                   <span className="text-xs font-bold bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg">
                     J-{Math.ceil((new Date(stay.arrival_date).getTime() - new Date(today).getTime()) / (1000 * 60 * 60 * 24))}
                   </span>
@@ -768,6 +797,7 @@ function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToa
                     <h3 className="font-bold text-lg">{stay.cat_name}</h3>
                     <span className="text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded font-bold uppercase">ID: {stay.id}</span>
                     <span className="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded font-bold uppercase">{stay.cat_species}</span>
+                    {(stay.cat_age || stay.cat_birth_date) && <span className="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded font-bold uppercase">{stay.cat_age || calculateAge(stay.cat_birth_date || "")}</span>}
                   </div>
                   <p className="text-stone-500 text-sm">Propriétaire: {stay.owner_name}</p>
                 </div>
@@ -1536,12 +1566,28 @@ function StayDetailsSection({ stay, onUpdate, settings, stays, showToast, askCon
   );
 }
 
-function ClientsView({ clients, onUpdate, showToast, askConfirm }: { clients: Client[], onUpdate: () => void, showToast: (m: string, t?: 'success' | 'error') => void, askConfirm: (t: string, m: string, c: () => void, d?: boolean) => void }) {
+function ClientsView({ clients, cats, stays, settings, onUpdate, showToast, askConfirm }: { clients: Client[], cats: Cat[], stays: Stay[], settings: Settings, onUpdate: () => void, showToast: (m: string, t?: 'success' | 'error') => void, askConfirm: (t: string, m: string, c: () => void, d?: boolean) => void }) {
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [formData, setFormData] = useState({ name: "", address: "", email: "", phone: "" });
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
+
+  if (selectedClient) {
+    return (
+      <ClientDashboard 
+        client={selectedClient} 
+        cats={cats} 
+        stays={stays} 
+        settings={settings} 
+        onBack={() => setSelectedClient(null)} 
+        onUpdate={onUpdate}
+        showToast={showToast} 
+        askConfirm={askConfirm} 
+      />
+    );
+  }
 
   const filteredClients = clients.filter(c => 
     c.name.toLowerCase().includes(search.toLowerCase()) || 
@@ -1697,13 +1743,292 @@ function ClientsView({ clients, onUpdate, showToast, askConfirm }: { clients: Cl
                 <button onClick={() => handleDelete(client.id)} className="p-2 text-stone-400 hover:text-red-600"><Trash2 size={18} /></button>
               </div>
             </div>
-            <div className="space-y-2 text-sm text-stone-600">
+            <div className="space-y-2 text-sm text-stone-600 mb-4">
               <div className="flex items-center gap-2"><span className="text-stone-400">Tél:</span> {client.phone}</div>
               <div className="flex items-center gap-2"><span className="text-stone-400">Adr:</span> {client.address}</div>
             </div>
+            <button 
+              onClick={() => setSelectedClient(client)} 
+              className="w-full bg-stone-50 text-emerald-700 py-2 rounded-xl text-sm font-bold border border-emerald-100 hover:bg-emerald-50 transition-colors"
+            >
+              Ouvrir la fiche client
+            </button>
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function ClientDashboard({ client, cats, stays, settings, onBack, onUpdate, showToast, askConfirm }: { client: Client, cats: Cat[], stays: Stay[], settings: Settings, onBack: () => void, onUpdate: () => void, showToast: (m: string, t?: 'success' | 'error') => void, askConfirm: (t: string, m: string, c: () => void, d?: boolean) => void }) {
+  const clientCats = cats.filter(c => c.owner_id === client.id);
+  const [activeMenu, setActiveMenu] = useState<"overview" | "add_cat" | "add_stay">("overview");
+  
+  const [editingCat, setEditingCat] = useState<Cat | null>(null);
+  const [catFormData, setCatFormData] = useState({ owner_id: client.id, name: "", species: "Chat", breed: "", color: "", chip_number: "", vaccine_tc_date: "", vaccine_l_date: "", parasite_treatment_date: "", birth_date: "", age: "" });
+  
+  const [stayFormData, setStayFormData] = useState({ 
+    cat_id: "", 
+    arrival_date: format(new Date(), "yyyy-MM-dd"), 
+    planned_departure: "", 
+    box_number: 1, 
+    comments: "" 
+  });
+  
+  const [status, setStatus] = useState("");
+  const boxOptions = Array.from({ length: settings.total_boxes ? parseInt(settings.total_boxes) : 3 }, (_, i) => i + 1);
+
+  const isBoxAvailable = (box: number, start: string, end: string) => {
+    if (!start || !end) return true;
+    const startDate = new Date(start).getTime();
+    const endDate = new Date(end).getTime();
+    return !stays.some(stay => {
+      if (stay.is_archived || stay.box_number !== box) return false;
+      const stayStart = new Date(stay.arrival_date).getTime();
+      const stayEnd = new Date(stay.actual_departure || stay.planned_departure).getTime();
+      return (startDate <= stayEnd && endDate >= stayStart);
+    });
+  };
+
+  const handleEditCatClick = (cat: Cat) => {
+    setCatFormData({
+      owner_id: cat.owner_id,
+      name: cat.name,
+      species: cat.species || "Chat",
+      breed: cat.breed || "",
+      color: cat.color || "",
+      chip_number: cat.chip_number || "",
+      vaccine_tc_date: cat.vaccine_tc_date || "",
+      vaccine_l_date: cat.vaccine_l_date || "",
+      parasite_treatment_date: cat.parasite_treatment_date || "",
+      birth_date: cat.birth_date || "",
+      age: cat.age || ""
+    });
+    setEditingCat(cat);
+    setActiveMenu("add_cat");
+  };
+
+  const handleDeleteCatClick = (id: string) => {
+    askConfirm(
+      "Supprimer cet animal ?", 
+      "ATTENTION: Supprimer cet animal supprimera également TOUS ses séjours. Continuer ?",
+      async () => {
+        try {
+          const res = await fetch(`/api/cats/${id}`, { method: "DELETE" });
+          if (!res.ok) throw new Error("Erreur de suppression");
+          showToast("Animal supprimé.");
+          onUpdate();
+        } catch (err: any) {
+          showToast(err.message, "error");
+        }
+      },
+      true
+    );
+  };
+
+  const handleSaveCat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!catFormData.name.trim()) return showToast("Nom du chat obligatoire", "error");
+    setStatus("Enregistrement...");
+    try {
+      const url = editingCat ? `/api/cats/${editingCat.id}` : "/api/cats";
+      const method = editingCat ? "PUT" : "POST";
+      const response = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(catFormData)
+      });
+      if (!response.ok) throw new Error("Erreur serveur");
+      showToast(editingCat ? "Animal modifié" : "Animal ajouté !");
+      setCatFormData({ owner_id: client.id, name: "", species: "Chat", breed: "", color: "", chip_number: "", vaccine_tc_date: "", vaccine_l_date: "", parasite_treatment_date: "", birth_date: "", age: "" });
+      setEditingCat(null);
+      setActiveMenu("overview");
+      onUpdate();
+    } catch (err: any) {
+      showToast(err.message, "error");
+    } finally {
+      setStatus("");
+    }
+  };
+
+  const handleSaveStay = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!stayFormData.cat_id) return showToast("Choisir un animal", "error");
+    if (!stayFormData.planned_departure) return showToast("Date de départ prévue requise", "error");
+    if (!isBoxAvailable(stayFormData.box_number, stayFormData.arrival_date, stayFormData.planned_departure)) {
+      return showToast(`Le Box ${stayFormData.box_number} n'est pas disponible.`, "error");
+    }
+    setStatus("Enregistrement...");
+    try {
+      const response = await fetch("/api/stays", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(stayFormData)
+      });
+      if (!response.ok) throw new Error("Erreur serveur");
+      showToast("Séjour créé !");
+      setStayFormData({ cat_id: "", arrival_date: format(new Date(), "yyyy-MM-dd"), planned_departure: "", box_number: 1, comments: "" });
+      setActiveMenu("overview");
+      onUpdate();
+    } catch (err: any) {
+      showToast(err.message, "error");
+    } finally {
+      setStatus("");
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <button onClick={onBack} className="flex items-center gap-2 text-stone-500 hover:text-stone-800 transition-colors">
+        <ChevronLeft size={20} /> Retour aux clients
+      </button>
+
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-200">
+        <div className="flex justify-between items-start">
+          <div>
+            <h2 className="text-2xl font-bold">{client.name}</h2>
+            <p className="text-stone-500">{client.email} • {client.phone}</p>
+            <p className="text-stone-500 text-sm">{client.address}</p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setActiveMenu("add_cat")} className="bg-emerald-100 text-emerald-700 px-4 py-2 rounded-lg font-bold text-sm hover:bg-emerald-200">
+              <Plus size={16} className="inline mr-1"/> Animal
+            </button>
+            <button onClick={() => setActiveMenu("add_stay")} className="bg-emerald-600 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-emerald-700">
+              <Plus size={16} className="inline mr-1"/> Séjour
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {status && (
+        <div className={`p-3 rounded-lg text-sm font-bold bg-emerald-100 text-emerald-700`}>{status}</div>
+      )}
+
+      {activeMenu === "add_cat" && (
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-200">
+          <h3 className="font-bold text-lg mb-4">{editingCat ? `Modifier ${editingCat.name}` : `Ajouter un animal pour ${client.name}`}</h3>
+          <form onSubmit={handleSaveCat} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-stone-500 uppercase">Nom de l'animal</label>
+              <input required className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" value={catFormData.name} onChange={e => setCatFormData({ ...catFormData, name: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-stone-500 uppercase">Espèce</label>
+              <select className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" value={catFormData.species} onChange={e => setCatFormData({ ...catFormData, species: e.target.value })}>
+                <option value="Chat">Chat</option><option value="Chien">Chien</option><option value="NAC">NAC</option><option value="Autre">Autre</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-stone-500 uppercase">Race</label>
+              <input className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" value={catFormData.breed} onChange={e => setCatFormData({ ...catFormData, breed: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-stone-500 uppercase">Couleur</label>
+              <input className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" value={catFormData.color} onChange={e => setCatFormData({ ...catFormData, color: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-stone-500 uppercase">Numéro de puce</label>
+              <input className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" value={catFormData.chip_number} onChange={e => setCatFormData({ ...catFormData, chip_number: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-stone-500 uppercase">Age (manuel)</label>
+              <input className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" value={catFormData.age || ""} onChange={e => setCatFormData({ ...catFormData, age: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-stone-500 uppercase">Date de Naissance</label>
+              <input type="date" className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" value={catFormData.birth_date || ""} onChange={e => { const val = e.target.value; setCatFormData({ ...catFormData, birth_date: val, age: val ? calculateAge(val) : catFormData.age }); }} />
+            </div>
+            <div className="col-span-2 flex justify-end gap-2 pt-4">
+              <button type="button" onClick={() => { setActiveMenu("overview"); setEditingCat(null); }} className="px-4 py-2 text-stone-500 font-medium">Annuler</button>
+              <button type="submit" className="bg-emerald-600 text-white px-6 py-2 rounded-lg font-medium">{editingCat ? "Mettre à jour" : "Enregistrer l'animal"}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {activeMenu === "add_stay" && (
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-200">
+          <h3 className="font-bold text-lg mb-4">Créer un séjour</h3>
+          <form onSubmit={handleSaveStay} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-stone-500 uppercase">Animal</label>
+              <select required className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" value={stayFormData.cat_id} onChange={e => setStayFormData({ ...stayFormData, cat_id: e.target.value })}>
+                <option value="">Sélectionner un animal</option>
+                {clientCats.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-stone-500 uppercase">Box</label>
+              <select className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" value={stayFormData.box_number} onChange={e => setStayFormData({ ...stayFormData, box_number: parseInt(e.target.value) })}>
+                {boxOptions.map(b => (
+                  <option key={b} value={b} className={isBoxAvailable(b, stayFormData.arrival_date, stayFormData.planned_departure) ? "" : "text-stone-300"}>
+                    Box {b} {!isBoxAvailable(b, stayFormData.arrival_date, stayFormData.planned_departure) && "(Occupé)"}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-stone-500 uppercase">Arrivée</label>
+              <input type="date" required className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" value={stayFormData.arrival_date} onChange={e => setStayFormData({ ...stayFormData, arrival_date: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-stone-500 uppercase">Départ Prévu</label>
+              <input type="date" required className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none" value={stayFormData.planned_departure} onChange={e => setStayFormData({ ...stayFormData, planned_departure: e.target.value })} />
+            </div>
+            <div className="col-span-2 flex justify-end gap-2 pt-4">
+              <button type="button" onClick={() => setActiveMenu("overview")} className="px-4 py-2 text-stone-500 font-medium">Annuler</button>
+              <button type="submit" className="bg-emerald-600 text-white px-6 py-2 rounded-lg font-medium">Réserver le séjour</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {activeMenu === "overview" && (
+        <div className="space-y-4">
+          <h3 className="font-bold text-lg">Animaux rattachés ({clientCats.length})</h3>
+          {clientCats.length === 0 && <p className="text-stone-500 text-sm">Ce client n'a aucun animal enregistré.</p>}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {clientCats.map(cat => {
+              const catStays = stays.filter(s => s.cat_id === cat.id).sort((a,b) => b.arrival_date.localeCompare(a.arrival_date));
+              return (
+                <div key={cat.id} className="bg-white p-5 rounded-xl shadow-sm border border-stone-200 group flex flex-col">
+                  <div className="flex-1">
+                    <div className="flex justify-between items-start mb-2">
+                      <h4 className="font-bold text-lg text-stone-900 flex items-center gap-2">
+                        {cat.name} <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-1 rounded font-bold uppercase">{cat.species}</span>
+                      </h4>
+                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => handleEditCatClick(cat)} className="p-1 text-stone-400 hover:text-emerald-600"><Edit size={16} /></button>
+                        <button onClick={() => handleDeleteCatClick(cat.id)} className="p-1 text-stone-400 hover:text-red-600"><Trash2 size={16} /></button>
+                      </div>
+                    </div>
+                    <div className="text-xs text-stone-500 grid grid-cols-2 gap-2 mb-4">
+                      <div><span className="font-bold block uppercase text-[10px]">Race</span> {cat.breed || "-"}</div>
+                      <div><span className="font-bold block uppercase text-[10px]">Puce</span> {cat.chip_number || "-"}</div>
+                      <div className="col-span-2"><span className="font-bold block uppercase text-[10px]">Age</span> {cat.age || (cat.birth_date ? calculateAge(cat.birth_date) : "-")}</div>
+                    </div>
+                    {catStays.length > 0 && (
+                      <div className="mb-4 space-y-2">
+                        <p className="text-[10px] uppercase font-bold text-stone-400">Derniers Séjours</p>
+                        {catStays.slice(0, 3).map(cs => (
+                          <div key={cs.id} className="text-xs flex justify-between bg-stone-50 p-2 rounded-lg border border-stone-100">
+                            <span>{formatDateSafe(cs.arrival_date)} → {formatDateSafe(cs.actual_departure || cs.planned_departure)}</span>
+                            <span className="font-bold text-emerald-700">Box {cs.box_number} {cs.is_archived && "(Terminé)"}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => { setStayFormData(s => ({ ...s, cat_id: cat.id })); setActiveMenu("add_stay"); }} className="w-full bg-stone-100 py-2 rounded-lg text-sm font-bold text-stone-700 hover:bg-stone-200 transition-colors mt-auto">
+                    <Plus size={14} className="inline mr-1"/> Nouveau séjour pour {cat.name}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1720,7 +2045,9 @@ function CatsView({ cats, clients, onUpdate, showToast, askConfirm }: { cats: Ca
     chip_number: "",
     vaccine_tc_date: "",
     vaccine_l_date: "",
-    parasite_treatment_date: ""
+    parasite_treatment_date: "",
+    birth_date: "",
+    age: ""
   });
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
@@ -1808,7 +2135,7 @@ function CatsView({ cats, clients, onUpdate, showToast, askConfirm }: { cats: Ca
             onChange={e => setSearch(e.target.value)}
           />
           <button 
-            onClick={() => { setIsAdding(true); setEditingCat(null); setFormData({ owner_id: clients[0]?.id || "", name: "", species: "Chat", breed: "", color: "", chip_number: "", vaccine_tc_date: "", vaccine_l_date: "", parasite_treatment_date: "" }); }}
+            onClick={() => { setIsAdding(true); setEditingCat(null); setFormData({ owner_id: clients[0]?.id || "", name: "", species: "Chat", breed: "", color: "", chip_number: "", vaccine_tc_date: "", vaccine_l_date: "", parasite_treatment_date: "", birth_date: "", age: "" }); }}
             className="bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors text-sm font-bold"
           >
             <Plus size={18} /> Nouveau
@@ -1878,6 +2205,27 @@ function CatsView({ cats, clients, onUpdate, showToast, askConfirm }: { cats: Ca
               />
             </div>
             <div className="space-y-1">
+              <label className="text-xs font-semibold text-stone-500 uppercase">Age (manuel)</label>
+              <input 
+                className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                placeholder="ex: 3 ans"
+                value={formData.age || ""}
+                onChange={e => setFormData({ ...formData, age: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-stone-500 uppercase">Date de Naissance</label>
+              <input 
+                type="date"
+                className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
+                value={formData.birth_date || ""}
+                onChange={e => {
+                  const val = e.target.value;
+                  setFormData({ ...formData, birth_date: val, age: val ? calculateAge(val) : formData.age });
+                }}
+              />
+            </div>
+            <div className="space-y-1">
               <label className="text-xs font-semibold text-stone-500 uppercase">Numéro de Puce</label>
               <input 
                 className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
@@ -1944,6 +2292,10 @@ function CatsView({ cats, clients, onUpdate, showToast, askConfirm }: { cats: Ca
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm mt-4">
+              <div className="col-span-2">
+                <span className="text-stone-400 block text-[10px] uppercase font-bold">Age</span> 
+                {cat.age || (cat.birth_date ? calculateAge(cat.birth_date) : "-")} {cat.birth_date && `(Né(e) le ${formatDateSafe(cat.birth_date)})`}
+              </div>
               <div><span className="text-stone-400 block text-[10px] uppercase font-bold">Race</span> {cat.breed || "-"}</div>
               <div><span className="text-stone-400 block text-[10px] uppercase font-bold">Couleur</span> {cat.color || "-"}</div>
               <div className="col-span-2"><span className="text-stone-400 block text-[10px] uppercase font-bold">Puce</span> {cat.chip_number || "-"}</div>
@@ -2592,7 +2944,7 @@ function StatsView({ stats }: { stats: any }) {
         </div>
 
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-stone-200">
-          <p className="text-xs font-bold text-stone-400 uppercase mb-1">Nombre de Séjours ({label})</p>
+          <p className="text-xs font-bold text-stone-400 uppercase mb-1">Jours Occupés ({label})</p>
           <span className="text-3xl font-bold text-blue-600">{displayOccupancy}</span>
         </div>
       </div>
@@ -2617,7 +2969,7 @@ function StatsView({ stats }: { stats: any }) {
             {stats.occupancy.map((o: any) => (
               <div key={o.month} className="flex justify-between items-center p-3 bg-stone-50 rounded-xl">
                 <span className="font-bold text-stone-600">{o.month}</span>
-                <span className="font-bold text-blue-600">{o.stays_count} séjours</span>
+                <span className="font-bold text-blue-600">{o.stays_count} jours occupés</span>
               </div>
             ))}
           </div>
@@ -3002,6 +3354,7 @@ function ContractsView({ stays, settings }: { stays: Stay[], settings: Settings 
     // Right Column: Animal
     doc.text(`Nom: ${stay.cat_name || "N/A"}`, 105, currentY);
     let rightY = currentY + 7;
+    doc.text(`Age: ${stay.cat_age || (stay.cat_birth_date ? calculateAge(stay.cat_birth_date) : "N/A")}`, 105, rightY); rightY += 7;
     doc.text(`Race: ${stay.cat_breed || "N/A"}`, 105, rightY); rightY += 7;
     doc.text(`Couleur: ${stay.cat_color || "N/A"}`, 105, rightY); rightY += 7;
     doc.text(`N° Puce: ${stay.cat_chip_number || "N/A"}`, 105, rightY); rightY += 7;

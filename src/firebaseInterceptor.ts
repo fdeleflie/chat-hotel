@@ -147,6 +147,7 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
               ...s,
               cat_name: cat.name, cat_species: cat.species, cat_breed: cat.breed, cat_color: cat.color,
               cat_chip_number: cat.chip_number, cat_vaccine_tc_date: cat.vaccine_tc_date,
+              cat_birth_date: cat.birth_date, cat_age: cat.age,
               owner_name: owner.name, owner_email: owner.email, owner_phone: owner.phone, owner_address: owner.address,
               ate_well: log.ate_well, abnormal_behavior: log.abnormal_behavior, medication: log.medication,
               incident: log.incident, health_comments: log.comments
@@ -260,8 +261,44 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
     
     // --- STATS ---
     if (path === '/api/stats') {
-      // Return dummy for now to prevent crash
-      return jsonResponse({ revenue: [], occupancy: [], totalBoxes: 3 });
+      const dbSettings = await getDocs(collection(db, 'settings'));
+      let totalBoxes = 3;
+      dbSettings.docs.forEach(d => {
+        if (d.id === 'total_boxes') {
+          totalBoxes = parseInt(d.data().value) || 3;
+        }
+      });
+      
+      const invoicesSnap = await getDocs(collection(db, 'invoices'));
+      const revenueMap: Record<string, number> = {};
+      invoicesSnap.docs.forEach(d => {
+        const inv = d.data();
+        if (inv.created_at) {
+          const month = inv.created_at.substring(0, 7);
+          revenueMap[month] = (revenueMap[month] || 0) + (Number(inv.amount) || 0);
+        }
+      });
+      const revenue = Object.keys(revenueMap).map(month => ({ month, total: revenueMap[month] })).sort((a, b) => b.month.localeCompare(a.month));
+
+      const staysSnap = await getDocs(collection(db, 'stays'));
+      const occupancyMap: Record<string, number> = {};
+      staysSnap.docs.forEach(d => {
+        const stay = d.data();
+        if (stay.arrival_date && stay.planned_departure) {
+          const arrival = new Date(stay.arrival_date);
+          const departure = new Date(stay.actual_departure || stay.planned_departure);
+          
+          let currentDate = new Date(arrival);
+          while (currentDate < departure) {
+            const month = currentDate.toISOString().substring(0, 7);
+            occupancyMap[month] = (occupancyMap[month] || 0) + 1;
+            currentDate.setDate(currentDate.getDate() + 1);
+          }
+        }
+      });
+      const occupancy = Object.keys(occupancyMap).map(month => ({ month, stays_count: occupancyMap[month] })).sort((a, b) => b.month.localeCompare(a.month));
+
+      return jsonResponse({ revenue, occupancy, totalBoxes });
     }
 
     // --- INVOICES ---
