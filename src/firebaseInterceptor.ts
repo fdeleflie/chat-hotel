@@ -164,11 +164,18 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
     if (path.startsWith('/api/stays/')) {
       const id = path.split('/').pop()!;
       if (method === 'PUT') {
-        const { box_number, arrival_date, planned_departure, actual_departure, comments, is_archived, ate_well, abnormal_behavior, medication, incident, health_comments } = body;
+        const { box_number, arrival_date, planned_departure, actual_departure, comments, is_archived, ate_well, abnormal_behavior, medication, incident, health_comments, contract_scan_url } = body;
         
-        await updateDoc(doc(db, 'stays', id), {
-          box_number, arrival_date, planned_departure, actual_departure, comments, is_archived: !!is_archived
-        });
+        const updateData: any = {};
+        if (box_number !== undefined) updateData.box_number = box_number;
+        if (arrival_date !== undefined) updateData.arrival_date = arrival_date;
+        if (planned_departure !== undefined) updateData.planned_departure = planned_departure;
+        updateData.actual_departure = actual_departure === undefined ? null : actual_departure;
+        if (comments !== undefined) updateData.comments = comments;
+        if (is_archived !== undefined) updateData.is_archived = !!is_archived;
+        if (contract_scan_url !== undefined) updateData.contract_scan_url = contract_scan_url;
+
+        await updateDoc(doc(db, 'stays', id), updateData);
 
         const q = query(collection(db, 'health_logs'), where('stay_id', '==', id));
         const healthSnap = await getDocs(q);
@@ -181,14 +188,20 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
           }
         });
 
+        const healthUpdateData: any = {
+          ate_well: !!ate_well, 
+          abnormal_behavior: !!abnormal_behavior
+        };
+        if (medication !== undefined) healthUpdateData.medication = medication === null ? "" : medication;
+        if (incident !== undefined) healthUpdateData.incident = incident === null ? "" : incident;
+        if (health_comments !== undefined) healthUpdateData.comments = health_comments === null ? "" : health_comments;
+
         if (latestLogId) {
-          await updateDoc(doc(db, 'health_logs', latestLogId), {
-            ate_well: !!ate_well, abnormal_behavior: !!abnormal_behavior, medication, incident, comments: health_comments
-          });
+          await updateDoc(doc(db, 'health_logs', latestLogId), healthUpdateData);
         } else {
           await addDoc(collection(db, 'health_logs'), {
             stay_id: id, date: new Date().toISOString().split('T')[0],
-            ate_well: !!ate_well, abnormal_behavior: !!abnormal_behavior, medication, incident, comments: health_comments
+            ...healthUpdateData
           });
         }
         return jsonResponse({ success: true });

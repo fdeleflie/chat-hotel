@@ -50,6 +50,7 @@ export interface Stay {
   medication?: string;
   incident?: string;
   health_comments?: string;
+  contract_scan_url?: string;
 }
 
 export interface HealthLog {
@@ -511,7 +512,7 @@ export default function App() {
         {activeTab === "cats" && <CatsView cats={cats} clients={clients} onUpdate={fetchData} showToast={showToast} askConfirm={askConfirm} />}
         {activeTab === "stats" && <StatsView stats={stats} />}
         {activeTab === "reports" && <ReportsView stays={[...stays, ...archivedStays]} onUpdate={fetchData} settings={settings} showToast={showToast} askConfirm={askConfirm} />}
-        {activeTab === "contracts" && <ContractsView stays={[...stays, ...archivedStays]} settings={settings} />}
+        {activeTab === "contracts" && <ContractsView stays={[...stays, ...archivedStays]} settings={settings} onUpdate={fetchData} showToast={showToast} askConfirm={askConfirm} />}
         {activeTab === "settings" && <SettingsView settings={settings} onUpdate={fetchData} showToast={showToast} askConfirm={askConfirm} />}
       </main>
 
@@ -2679,6 +2680,7 @@ function CalendarView({ stays, onUpdate, settings, showToast, askConfirm }: { st
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedStay, setSelectedStay] = useState<Stay | null>(null);
   const [viewMode, setViewMode] = useState<"global" | "boxes">("global");
+  const [boxesTimeRange, setBoxesTimeRange] = useState<"month" | "quarter" | "year">("month");
 
   const totalBoxes = parseInt(settings.total_boxes || "3");
   const boxOptions = Array.from({ length: totalBoxes }, (_, i) => i + 1);
@@ -2690,13 +2692,40 @@ function CalendarView({ stays, onUpdate, settings, showToast, askConfirm }: { st
   for (let i = 0; i < (firstDayOfMonth === 0 ? 6 : firstDayOfMonth - 1); i++) days.push(null);
   for (let i = 1; i <= daysInMonth; i++) days.push(i);
 
+  let daysToRender: Date[] = [];
+  let displayLabel = format(currentDate, "MMMM yyyy");
+  
+  if (viewMode === "boxes") {
+    const y = currentDate.getFullYear();
+    const m = currentDate.getMonth();
+    
+    if (boxesTimeRange === "month") {
+      const dim = new Date(y, m + 1, 0).getDate();
+      for (let i = 1; i <= dim; i++) daysToRender.push(new Date(y, m, i));
+      displayLabel = format(currentDate, "MMMM yyyy");
+    } else if (boxesTimeRange === "quarter") {
+      const quarterStartMonth = Math.floor(m / 3) * 3;
+      for (let i = 0; i < 3; i++) {
+        const d = new Date(y, quarterStartMonth + i + 1, 0).getDate();
+        for (let j = 1; j <= d; j++) daysToRender.push(new Date(y, quarterStartMonth + i, j));
+      }
+      displayLabel = `Trimestre ${Math.floor(m / 3) + 1} ${y}`;
+    } else if (boxesTimeRange === "year") {
+      for (let month = 0; month < 12; month++) {
+        const d = new Date(y, month + 1, 0).getDate();
+        for (let j = 1; j <= d; j++) daysToRender.push(new Date(y, month, j));
+      }
+      displayLabel = `Année ${y}`;
+    }
+  }
+
   const getStaysForDay = (day: number) => {
     const dateStr = format(new Date(currentDate.getFullYear(), currentDate.getMonth(), day), "yyyy-MM-dd");
     return stays.filter(s => s.arrival_date <= dateStr && (s.actual_departure || s.planned_departure) >= dateStr);
   };
 
-  const getStaysForBoxAndDay = (box: number, day: number) => {
-    const dateStr = format(new Date(currentDate.getFullYear(), currentDate.getMonth(), day), "yyyy-MM-dd");
+  const getStaysForBoxAndDate = (box: number, d: Date) => {
+    const dateStr = format(d, "yyyy-MM-dd");
     return stays.filter(s => s.box_number === box && s.arrival_date <= dateStr && (s.actual_departure || s.planned_departure) >= dateStr);
   };
 
@@ -2744,11 +2773,25 @@ function CalendarView({ stays, onUpdate, settings, showToast, askConfirm }: { st
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))} className="p-2 hover:bg-stone-100 rounded-lg"><ChevronLeft /></button>
-          <span className="font-bold text-lg min-w-[150px] text-center uppercase tracking-widest">{format(currentDate, "MMMM yyyy")}</span>
-          <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))} className="p-2 hover:bg-stone-100 rounded-lg"><ChevronRight /></button>
+          <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - (viewMode === "boxes" && boxesTimeRange === "quarter" ? 3 : viewMode === "boxes" && boxesTimeRange === "year" ? 12 : 1)))} className="p-2 hover:bg-stone-100 rounded-lg"><ChevronLeft /></button>
+          <span className="font-bold text-lg min-w-[150px] text-center uppercase tracking-widest">{displayLabel}</span>
+          <button onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + (viewMode === "boxes" && boxesTimeRange === "quarter" ? 3 : viewMode === "boxes" && boxesTimeRange === "year" ? 12 : 1)))} className="p-2 hover:bg-stone-100 rounded-lg"><ChevronRight /></button>
         </div>
       </div>
+      
+      {viewMode === "boxes" && (
+        <div className="flex gap-2">
+          {["month", "quarter", "year"].map((r) => (
+             <button
+               key={r}
+               onClick={() => setBoxesTimeRange(r as any)}
+               className={`px-3 py-1 text-xs font-bold rounded-lg ${boxesTimeRange === r ? "bg-emerald-100 text-emerald-700" : "bg-stone-100 text-stone-600 hover:bg-stone-200"}`}
+             >
+               {r === "month" ? "Mois" : r === "quarter" ? "Trimestre" : "Année"}
+             </button>
+          ))}
+        </div>
+      )}
 
       {viewMode === "global" ? (
         <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-x-auto">
@@ -2784,28 +2827,31 @@ function CalendarView({ stays, onUpdate, settings, showToast, askConfirm }: { st
       </div>
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-stone-200 overflow-x-auto">
-          <div className="min-w-[1200px]">
-            <div className="grid grid-cols-[100px_repeat(31,1fr)] bg-stone-50 border-b border-stone-200">
-              <div className="p-3 text-xs font-bold text-stone-400 uppercase border-r border-stone-200">Box</div>
-              {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => (
-                <div key={d} className="p-3 text-center text-[10px] font-bold text-stone-400 border-r border-stone-100 last:border-r-0">{d}</div>
+          <div style={{ minWidth: `${Math.max(1200, daysToRender.length * 30 + 100)}px` }}>
+            <div className="bg-stone-50 border-b border-stone-200" style={{ display: 'grid', gridTemplateColumns: `100px repeat(${daysToRender.length}, minmax(30px, 1fr))`}}>
+              <div className="p-3 text-xs font-bold text-stone-400 uppercase border-r border-stone-200 sticky left-0 bg-stone-50">Box</div>
+              {daysToRender.map((d, i) => (
+                <div key={i} className="p-2 text-center border-r border-stone-100 last:border-r-0 flex flex-col items-center justify-center">
+                  <span className="text-[8px] uppercase text-stone-400">{format(d, "MMM")}</span>
+                  <span className="text-[10px] font-bold text-stone-600">{format(d, "dd")}</span>
+                </div>
               ))}
             </div>
             {boxOptions.map(box => (
-              <div key={box} className="grid grid-cols-[100px_repeat(31,1fr)] border-b border-stone-100 last:border-b-0">
-                <div className="p-3 text-sm font-bold text-stone-600 bg-stone-50/30 border-r border-stone-200">Box {box}</div>
-                {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(day => {
-                  const dayStays = getStaysForBoxAndDay(box, day);
+              <div key={box} className="border-b border-stone-100 last:border-b-0" style={{ display: 'grid', gridTemplateColumns: `100px repeat(${daysToRender.length}, minmax(30px, 1fr))`}}>
+                <div className="p-3 text-sm font-bold text-stone-600 bg-stone-50/90 border-r border-stone-200 sticky left-0 z-10 flex items-center">Box {box}</div>
+                {daysToRender.map((d, i) => {
+                  const dayStays = getStaysForBoxAndDate(box, d);
                   return (
-                    <div key={day} className="p-1 border-r border-stone-50 last:border-r-0 min-h-[40px] flex flex-col gap-0.5">
+                    <div key={i} className={`p-0.5 border-r border-stone-50 last:border-r-0 min-h-[40px] flex flex-col gap-0.5 ${[0, 6].includes(d.getDay()) ? 'bg-stone-50/50' : ''}`}>
                       {dayStays.map(stay => (
                         <button 
                           key={stay.id}
                           onClick={() => setSelectedStay(stay)}
-                          className={`w-full h-full rounded text-[8px] p-0.5 font-bold truncate ${stay.is_archived ? 'bg-stone-100 text-stone-400' : `${getBoxSolidColor(stay.box_number)} text-white`}`}
+                          className={`w-full h-full rounded text-[8px] p-0.5 font-bold truncate ${stay.is_archived ? 'bg-stone-200 text-stone-500' : `${getBoxSolidColor(stay.box_number)} text-white`}`}
                           title={`${stay.cat_name} (${stay.arrival_date} - ${stay.actual_departure || stay.planned_departure})`}
                         >
-                          {stay.cat_name}
+                          {stay.cat_name.substring(0, 3)}
                         </button>
                       ))}
                     </div>
@@ -3269,13 +3315,81 @@ function HealthSummary({ stayId }: { stayId: number }) {
   );
 }
 
-function ContractsView({ stays, settings }: { stays: Stay[], settings: Settings }) {
+function ContractsView({ stays, settings, onUpdate, showToast, askConfirm }: { stays: Stay[], settings: Settings, onUpdate: () => void, showToast: (m: string, t?: 'success' | 'error') => void, askConfirm: (t: string, m: string, c: () => void, d?: boolean) => void }) {
   const [searchTerm, setSearchTerm] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
 
   const filteredStays = stays.filter(s => 
     s.cat_name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
     s.owner_name?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const handleUploadScan = async (stay: Stay, file: File) => {
+    if (!file.type.startsWith('image/') && file.type !== 'application/pdf') {
+      return showToast("Le fichier doit être une image ou un PDF.", "error");
+    }
+    
+    setUploadingId(stay.id);
+    
+    try {
+      let base64 = "";
+      if (file.type.startsWith('image/')) {
+         // Compress image to save database space
+         base64 = await new Promise<string>((resolve, reject) => {
+           const reader = new FileReader();
+           reader.onload = (e) => {
+             const img = new Image();
+             img.onload = () => {
+                const canvas = document.createElement("canvas");
+                const MAX_WIDTH = 1200;
+                const MAX_HEIGHT = 1600;
+                let width = img.width;
+                let height = img.height;
+                if (width > height && width > MAX_WIDTH) {
+                  height *= MAX_WIDTH / width;
+                  width = MAX_WIDTH;
+                } else if (height > MAX_HEIGHT) {
+                  width *= MAX_HEIGHT / height;
+                  height = MAX_HEIGHT;
+                }
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext("2d");
+                ctx?.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL("image/jpeg", 0.7));
+             };
+             img.onerror = () => reject(new Error("Erreur de compression d'image"));
+             img.src = e.target?.result as string;
+           };
+           reader.readAsDataURL(file);
+         });
+      } else {
+         if (file.size > 1000000) { // 1MB max for PDF
+             setUploadingId(null);
+             return showToast("Le PDF est trop lourd (Max 1Mo).", "error");
+         }
+         base64 = await new Promise<string>((resolve) => {
+           const reader = new FileReader();
+           reader.onload = (e) => resolve(e.target?.result as string);
+           reader.readAsDataURL(file);
+         });
+      }
+
+      const res = await fetch(`/api/stays/${stay.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...stay, contract_scan_url: base64 })
+      });
+      if (!res.ok) throw new Error("Erreur de sauvegarde.");
+      showToast("Contrat scanné ajouté avec succès !");
+      onUpdate();
+    } catch (e: any) {
+      showToast(e.message, "error");
+    } finally {
+      setUploadingId(null);
+    }
+  };
 
   const generateContractPDF = (stay: Stay) => {
     const doc = new jsPDF();
@@ -3416,7 +3530,7 @@ function ContractsView({ stays, settings }: { stays: Stay[], settings: Settings 
     doc.text("Signatures", 14, currentY);
     doc.setFontSize(10);
     doc.text("Le Client (lu et approuvé)", 14, currentY + 10);
-    doc.text("La Pension", 120, currentY + 10);
+    doc.text(settings.company_name || "La Pension", 120, currentY + 10);
 
     doc.save(`Contrat_${stay.owner_name}_${stay.cat_name}_${stay.arrival_date}.pdf`);
   };
@@ -3455,12 +3569,73 @@ function ContractsView({ stays, settings }: { stays: Stay[], settings: Settings 
                   {format(new Date(stay.arrival_date), "dd/MM/yyyy")} au {format(new Date(stay.planned_departure), "dd/MM/yyyy")}
                 </td>
                 <td className="p-4">
-                  <button 
-                    onClick={() => generateContractPDF(stay)} 
-                    className="text-indigo-600 hover:text-indigo-800 text-sm font-bold bg-indigo-50 px-3 py-1 rounded-lg transition-colors flex items-center gap-2"
-                  >
-                    <FileText size={16} /> Générer PDF
-                  </button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button 
+                      onClick={() => generateContractPDF(stay)} 
+                      className="text-indigo-600 hover:text-indigo-800 text-sm font-bold bg-indigo-50 px-3 py-1 rounded-lg transition-colors flex items-center gap-2"
+                    >
+                      <FileText size={16} /> Générer PDF
+                    </button>
+                    {!stay.contract_scan_url ? (
+                      <label className={`cursor-pointer text-emerald-600 hover:text-emerald-800 text-sm font-bold bg-emerald-50 px-3 py-1 rounded-lg transition-colors flex items-center gap-2 ${uploadingId === stay.id ? 'opacity-50 pointer-events-none' : ''}`}>
+                        <Upload size={16} /> {uploadingId === stay.id ? "Envoi..." : "Uploader Signé"}
+                        <input 
+                          type="file" 
+                          className="hidden" 
+                          accept="image/*,application/pdf"
+                          onChange={(e) => {
+                            if (e.target.files?.[0]) handleUploadScan(stay, e.target.files[0]);
+                          }}
+                        />
+                      </label>
+                    ) : (
+                      <div className="flex items-center gap-1">
+                         <a 
+                           href={stay.contract_scan_url} 
+                           download={`Contrat_Signe_${stay.owner_name}_${stay.cat_name}.pdf`} 
+                           className="text-emerald-700 hover:text-emerald-900 text-sm font-bold border border-emerald-200 bg-emerald-50 px-3 py-1 rounded-l-lg transition-colors flex items-center gap-2"
+                         >
+                           <FileText size={16} /> Signé
+                         </a>
+                         <label className="cursor-pointer text-emerald-700 hover:text-emerald-900 text-sm font-bold border border-l-0 border-emerald-200 bg-emerald-50 px-2 py-1 transition-colors flex items-center" title="Remplacer">
+                           <Upload size={14} />
+                           <input 
+                            type="file" 
+                            className="hidden" 
+                            accept="image/*,application/pdf"
+                            onChange={(e) => {
+                              if (e.target.files?.[0]) handleUploadScan(stay, e.target.files[0]);
+                            }}
+                           />
+                         </label>
+                         <button 
+                           onClick={() => {
+                             askConfirm(
+                               "Supprimer le contrat signé ?", 
+                               `Êtes-vous sûr de vouloir supprimer le contrat signé pour le séjour de ${stay.cat_name} ?`, 
+                               async () => {
+                                 try {
+                                   const res = await fetch(`/api/stays/${stay.id}`, {
+                                      method: "PUT",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ ...stay, contract_scan_url: null })
+                                   });
+                                   if (!res.ok) throw new Error("Erreur");
+                                   onUpdate();
+                                   showToast("Contrat supprimé");
+                                 } catch(e) {
+                                   showToast("Erreur de suppression", "error");
+                                 }
+                               }, 
+                               true
+                             );
+                           }}
+                           className="text-red-500 hover:text-red-700 text-sm font-bold border border-l-0 border-red-200 bg-red-50 px-2 py-1 rounded-r-lg transition-colors flex items-center" title="Supprimer">
+                           <Trash2 size={14} />
+                         </button>
+                      </div>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
