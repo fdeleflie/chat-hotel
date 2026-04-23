@@ -29,11 +29,23 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
 
   try {
     // --- SETTINGS ---
-    if (path === '/api/settings') {
+    if (path.startsWith('/api/settings')) {
       if (method === 'GET') {
         const snap = await getDocs(collection(db, 'settings'));
         const config: any = {};
-        snap.forEach(d => { config[d.id] = d.data().value; });
+        snap.forEach(d => { 
+          const data = d.data();
+          if ((d.id === 'payment_methods' || d.id === 'invoice_statuses') && data.value) {
+            try {
+              config[d.id] = JSON.parse(data.value);
+            } catch (e) {
+              if (d.id === 'payment_methods') config[d.id] = ["CB", "Chèque", "Espèces", "Virement"];
+              else config[d.id] = undefined;
+            }
+          } else {
+            config[d.id] = data.value; 
+          }
+        });
         return jsonResponse(config);
       }
       if (method === 'POST') {
@@ -61,6 +73,21 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
       }
     }
 
+    // Helper function for stay deletion
+    async function deleteStayRelatedData(db: any, stayId: string) {
+       // Delete health logs
+       const hlSnap = await getDocs(query(collection(db, 'health_logs'), where('stay_id', '==', stayId)));
+       for (const d of hlSnap.docs) await deleteDoc(doc(db, 'health_logs', d.id));
+
+       // Delete media
+       const mSnap = await getDocs(query(collection(db, 'media'), where('stay_id', '==', stayId)));
+       for (const d of mSnap.docs) await deleteDoc(doc(db, 'media', d.id));
+
+       // Delete invoices
+       const iSnap = await getDocs(query(collection(db, 'invoices'), where('stay_id', '==', stayId)));
+       for (const d of iSnap.docs) await deleteDoc(doc(db, 'invoices', d.id));
+    }
+
     // --- CLIENTS ---
     if (path === '/api/clients') {
       if (method === 'GET') {
@@ -79,6 +106,16 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
         return jsonResponse({ success: true });
       }
       if (method === 'DELETE') {
+        // Recursive delete: Cats -> Stays -> Related
+        const catsSnap = await getDocs(query(collection(db, 'cats'), where('owner_id', '==', id)));
+        for(const catDoc of catsSnap.docs) {
+           const staysSnap = await getDocs(query(collection(db, 'stays'), where('cat_id', '==', catDoc.id)));
+           for(const stayDoc of staysSnap.docs) {
+              await deleteStayRelatedData(db, stayDoc.id);
+              await deleteDoc(doc(db, 'stays', stayDoc.id));
+           }
+           await deleteDoc(doc(db, 'cats', catDoc.id));
+        }
         await deleteDoc(doc(db, 'clients', id));
         return jsonResponse({ success: true });
       }
@@ -109,6 +146,11 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
         return jsonResponse({ success: true });
       }
       if (method === 'DELETE') {
+        const staysSnap = await getDocs(query(collection(db, 'stays'), where('cat_id', '==', id)));
+        for(const stayDoc of staysSnap.docs) {
+          await deleteStayRelatedData(db, stayDoc.id);
+          await deleteDoc(doc(db, 'stays', stayDoc.id));
+        }
         await deleteDoc(doc(db, 'cats', id));
         return jsonResponse({ success: true });
       }
@@ -117,7 +159,6 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
     // --- STAYS ---
     if (path === '/api/stays') {
       if (method === 'GET') {
-        const isArchived = searchParams.get('archived') === 'true';
         const staysSnap = await getDocs(collection(db, 'stays'));
         const catsSnap = await getDocs(collection(db, 'cats'));
         const clientsSnap = await getDocs(collection(db, 'clients'));
@@ -138,7 +179,6 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
 
         const stays = staysSnap.docs
           .map(d => ({ id: d.id, ...d.data() }))
-          .filter((s: any) => s.is_archived === isArchived)
           .map((s: any) => {
             const cat = catsMap.get(s.cat_id?.toString()) || {};
             const owner = clientsMap.get(cat.owner_id?.toString()) || {};
@@ -156,7 +196,6 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
         return jsonResponse(stays.sort((a, b) => b.arrival_date.localeCompare(a.arrival_date)));
       }
       if (method === 'POST') {
-        body.is_archived = false;
         const docRef = await addDoc(collection(db, 'stays'), body);
         return jsonResponse({ id: docRef.id });
       }
@@ -164,7 +203,7 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
     if (path.startsWith('/api/stays/')) {
       const id = path.split('/').pop()!;
       if (method === 'PUT') {
-        const { box_number, arrival_date, planned_departure, actual_departure, comments, is_archived, ate_well, abnormal_behavior, medication, incident, health_comments, contract_scan_url } = body;
+        const { box_number, arrival_date, planned_departure, actual_departure, comments, ate_well, abnormal_behavior, medication, incident, health_comments, contract_scan_url } = body;
         
         const updateData: any = {};
         if (box_number !== undefined) updateData.box_number = box_number;
@@ -172,7 +211,6 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
         if (planned_departure !== undefined) updateData.planned_departure = planned_departure;
         updateData.actual_departure = actual_departure === undefined ? null : actual_departure;
         if (comments !== undefined) updateData.comments = comments;
-        if (is_archived !== undefined) updateData.is_archived = !!is_archived;
         if (contract_scan_url !== undefined) updateData.contract_scan_url = contract_scan_url;
 
         await updateDoc(doc(db, 'stays', id), updateData);
@@ -207,6 +245,7 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
         return jsonResponse({ success: true });
       }
       if (method === 'DELETE') {
+        await deleteStayRelatedData(db, id);
         await deleteDoc(doc(db, 'stays', id));
         return jsonResponse({ success: true });
       }
@@ -214,7 +253,6 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
 
     // --- HEALTH LOGS ---
     if (path === '/api/health-reports') {
-      const isArchived = searchParams.get('archived') === 'true';
       const staysSnap = await getDocs(collection(db, 'stays'));
       const catsSnap = await getDocs(collection(db, 'cats'));
       const clientsSnap = await getDocs(collection(db, 'clients'));
@@ -234,7 +272,6 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
 
       const reports = staysSnap.docs
         .map(d => ({ id: d.id, ...d.data() }))
-        .filter((s: any) => s.is_archived === isArchived)
         .map((s: any) => {
           const cat = catsMap.get(s.cat_id?.toString()) || {};
           const owner = clientsMap.get(cat.owner_id?.toString()) || {};
@@ -287,8 +324,13 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
       invoicesSnap.docs.forEach(d => {
         const inv = d.data();
         if (inv.created_at) {
-          const month = inv.created_at.substring(0, 7);
-          revenueMap[month] = (revenueMap[month] || 0) + (Number(inv.amount) || 0);
+          // CA Encaissé: only count paid or partially_paid invoices
+          const isEncashed = !inv.status || inv.status === 'paid' || inv.status === 'partially_paid';
+          if (isEncashed) {
+            const month = inv.created_at.substring(0, 7);
+            const amount = inv.type === 'final' ? (Number(inv.amount) - (Number(inv.deposit_amount) || 0)) : (Number(inv.amount) || 0);
+            revenueMap[month] = (revenueMap[month] || 0) + amount;
+          }
         }
       });
       const revenue = Object.keys(revenueMap).map(month => ({ month, total: revenueMap[month] })).sort((a, b) => b.month.localeCompare(a.month));
@@ -315,6 +357,12 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
     }
 
     // --- INVOICES ---
+    if (path === '/api/invoices/all') {
+      if (method === 'GET') {
+        const snap = await getDocs(collection(db, 'invoices'));
+        return jsonResponse(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      }
+    }
     if (path.startsWith('/api/invoices')) {
       if (method === 'GET') {
         const stayId = path.split('/').pop()!;
@@ -324,7 +372,12 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
       }
       if (method === 'POST') {
         const year = body.created_at ? body.created_at.substring(0, 4) : new Date().getFullYear().toString();
-        body.invoice_number = `${year}-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
+        // Generate number correctly if not provided
+        if (!body.invoice_number) {
+          body.invoice_number = `${year}-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`;
+        }
+        if (!body.type) body.type = 'standard';
+        
         const docRef = await addDoc(collection(db, 'invoices'), body);
         return jsonResponse({ id: docRef.id, invoice_number: body.invoice_number });
       }

@@ -72,15 +72,33 @@ export interface Media {
   filename: string;
 }
 
+export type InvoiceStatus = 'draft' | 'pending' | 'partially_paid' | 'paid' | 'overdue' | 'cancelled' | 'refunded';
+
 export interface Invoice {
   id: string;
   stay_id: string;
   amount: number;
   service_type: string;
   created_at: string;
-  invoice_number?: string;
+  invoice_number: string;
+  type: 'standard' | 'deposit' | 'final';
+  status: InvoiceStatus;
+  payment_method?: string;
+  deposit_amount?: number;
+  reference_total?: number; // Original total for deposit calculation
+  related_invoice_number?: string;
+  arrival_date?: string;
+  departure_date?: string;
+  owner_name?: string; // Cache for central view
+  cat_name?: string;   // Cache for central view
 }
 
+
+export interface InvoiceStatusConfig {
+  label: string;
+  color: string;
+  bg: string;
+}
 
 export interface Settings {
   logo?: string;
@@ -93,9 +111,11 @@ export interface Settings {
   company_email?: string;
   company_siret?: string;
   company_acaced?: string;
+  payment_methods?: string[];
+  invoice_statuses?: Record<string, InvoiceStatusConfig>;
 }
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { 
   Users, 
   Cat as CatIcon, 
@@ -118,7 +138,9 @@ import {
   AlertCircle,
   LogOut,
   Camera,
-  Menu
+  Menu,
+  CreditCard,
+  ExternalLink
 } from "lucide-react";
 import { format, isValid } from "date-fns";
 import { jsPDF } from "jspdf";
@@ -221,16 +243,30 @@ function Toast({ message, type, onClose }: { message: string, type: 'success' | 
   );
 }
 
+export const DEFAULT_INVOICE_STATUS_LABELS: Record<string, InvoiceStatusConfig> = {
+  draft: { label: 'Brouillon', color: 'text-stone-500', bg: 'bg-stone-100' },
+  pending: { label: 'Emise / En attente', color: 'text-orange-600', bg: 'bg-orange-50' },
+  partially_paid: { label: 'Partiellement payée', color: 'text-blue-600', bg: 'bg-blue-50' },
+  paid: { label: 'Acquittée / Payée', color: 'text-emerald-600', bg: 'bg-emerald-50' },
+  overdue: { label: 'En retard', color: 'text-red-600', bg: 'bg-red-50' },
+  cancelled: { label: 'Annulée / Avoir', color: 'text-stone-400', bg: 'bg-stone-200' },
+  refunded: { label: 'Remboursée', color: 'text-purple-600', bg: 'bg-purple-50' }
+};
+
+export const getInvoiceStatusConfig = (status: string, settings?: Settings): InvoiceStatusConfig => {
+  return settings?.invoice_statuses?.[status] || DEFAULT_INVOICE_STATUS_LABELS[status] || DEFAULT_INVOICE_STATUS_LABELS.draft;
+};
+
 export default function App() {
   const [showMigration, setShowMigration] = useState(window.location.hash === '#migrate');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"clients" | "cats" | "stays" | "archives" | "stats" | "calendar" | "reports" | "contracts" | "settings">("stays");
+  const [activeTab, setActiveTab] = useState<"clients" | "cats" | "stays" | "stats" | "calendar" | "reports" | "contracts" | "settings" | "all-invoices">("stays");
+  const [allInvoicesTabMonth, setAllInvoicesTabMonth] = useState<string | null>(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [cats, setCats] = useState<Cat[]>([]);
   const [stays, setStays] = useState<Stay[]>([]);
-  const [archivedStays, setArchivedStays] = useState<Stay[]>([]);
   const [stats, setStats] = useState<any>(null);
   const [settings, setSettings] = useState<Settings>({});
   const [loading, setLoading] = useState(true);
@@ -268,11 +304,10 @@ export default function App() {
     try {
       console.log("Fetching data...");
       const t = Date.now();
-      const [clientsRes, catsRes, staysRes, archivedStaysRes, settingsRes, statsRes] = await Promise.all([
+      const [clientsRes, catsRes, staysRes, settingsRes, statsRes] = await Promise.all([
         fetch(`/api/clients?t=${t}`),
         fetch(`/api/cats?t=${t}`),
-        fetch(`/api/stays?t=${t}`),
-        fetch(`/api/stays?archived=true&t=${t}`),
+        fetch(`/api/stays?all=true&t=${t}`),
         fetch(`/api/settings?t=${t}`),
         fetch(`/api/stats?t=${t}`)
       ]);
@@ -280,14 +315,12 @@ export default function App() {
       const clientsData = await clientsRes.json();
       const catsData = await catsRes.json();
       const staysData = await staysRes.json();
-      const archivedStaysData = await archivedStaysRes.json();
       const settingsData = await settingsRes.json();
       const statsData = await statsRes.json();
 
       if (Array.isArray(clientsData)) setClients(clientsData);
       if (Array.isArray(catsData)) setCats(catsData);
       if (Array.isArray(staysData)) setStays(staysData);
-      if (Array.isArray(archivedStaysData)) setArchivedStays(archivedStaysData);
       if (settingsData && !settingsData.error) setSettings(settingsData);
       if (statsData && !statsData.error) setStats(statsData);
     } catch (error) {
@@ -434,12 +467,6 @@ export default function App() {
             label="Calendrier" 
           />
           <NavItem 
-            active={activeTab === "archives"} 
-            onClick={() => { setActiveTab("archives"); setIsMenuOpen(false); }} 
-            icon={<LogOut size={20} className="text-stone-400" />} 
-            label="Archives" 
-          />
-          <NavItem 
             active={activeTab === "clients"} 
             onClick={() => { setActiveTab("clients"); setIsMenuOpen(false); }} 
             icon={<Users size={20} />} 
@@ -469,6 +496,12 @@ export default function App() {
             icon={<FileText size={20} className="text-indigo-500" />} 
             label="Contrats" 
           />
+          <NavItem 
+            active={activeTab === "all-invoices"} 
+            onClick={() => { setActiveTab("all-invoices"); setIsMenuOpen(false); }} 
+            icon={<FileText size={20} className="text-emerald-500" />} 
+            label="Facturations" 
+          />
           <div className="pt-4 mt-4 border-t border-stone-100 flex flex-col gap-2">
             <NavItem 
               active={activeTab === "settings"} 
@@ -487,10 +520,10 @@ export default function App() {
         </nav>
 
         <div className="p-4 border-t border-stone-100">
-          <div className={`p-3 rounded-xl flex items-center gap-3 ${stays.filter(s => !s.is_archived && s.arrival_date <= format(new Date(), "yyyy-MM-dd") && (s.actual_departure || s.planned_departure) >= format(new Date(), "yyyy-MM-dd")).length >= parseInt(settings.total_boxes || "3") ? "bg-red-50" : "bg-emerald-50"}`}>
-            <div className={`w-2 h-2 rounded-full animate-pulse ${stays.filter(s => !s.is_archived && s.arrival_date <= format(new Date(), "yyyy-MM-dd") && (s.actual_departure || s.planned_departure) >= format(new Date(), "yyyy-MM-dd")).length >= parseInt(settings.total_boxes || "3") ? "bg-red-500" : "bg-emerald-500"}`}></div>
-            <span className={`text-xs font-medium ${stays.filter(s => !s.is_archived && s.arrival_date <= format(new Date(), "yyyy-MM-dd") && (s.actual_departure || s.planned_departure) >= format(new Date(), "yyyy-MM-dd")).length >= parseInt(settings.total_boxes || "3") ? "text-red-700" : "text-emerald-700"}`}>
-              {Math.max(0, parseInt(settings.total_boxes || "3") - stays.filter(s => !s.is_archived && s.arrival_date <= format(new Date(), "yyyy-MM-dd") && (s.actual_departure || s.planned_departure) >= format(new Date(), "yyyy-MM-dd")).length)} Box Disponibles
+          <div className={`p-3 rounded-xl flex items-center gap-3 ${stays.filter(s => s.arrival_date <= format(new Date(), "yyyy-MM-dd") && (s.actual_departure || s.planned_departure) >= format(new Date(), "yyyy-MM-dd")).length >= parseInt(settings.total_boxes || "3") ? "bg-red-50" : "bg-emerald-50"}`}>
+            <div className={`w-2 h-2 rounded-full animate-pulse ${stays.filter(s => s.arrival_date <= format(new Date(), "yyyy-MM-dd") && (s.actual_departure || s.planned_departure) >= format(new Date(), "yyyy-MM-dd")).length >= parseInt(settings.total_boxes || "3") ? "bg-red-500" : "bg-emerald-500"}`}></div>
+            <span className={`text-xs font-medium ${stays.filter(s => s.arrival_date <= format(new Date(), "yyyy-MM-dd") && (s.actual_departure || s.planned_departure) >= format(new Date(), "yyyy-MM-dd")).length >= parseInt(settings.total_boxes || "3") ? "text-red-700" : "text-emerald-700"}`}>
+              {Math.max(0, parseInt(settings.total_boxes || "3") - stays.filter(s => s.arrival_date <= format(new Date(), "yyyy-MM-dd") && (s.actual_departure || s.planned_departure) >= format(new Date(), "yyyy-MM-dd")).length)} Box Disponibles
             </span>
           </div>
           <button 
@@ -506,13 +539,31 @@ export default function App() {
       {/* Main Content */}
       <main className="lg:ml-64 p-4 lg:p-8 transition-all duration-300">
         {activeTab === "stays" && <StaysView stays={stays} cats={cats} onUpdate={fetchData} settings={settings} showToast={showToast} askConfirm={askConfirm} />}
-        {activeTab === "archives" && <StaysView stays={archivedStays} cats={cats} onUpdate={fetchData} isArchive settings={settings} showToast={showToast} askConfirm={askConfirm} />}
-        {activeTab === "calendar" && <CalendarView stays={[...stays, ...archivedStays]} onUpdate={fetchData} settings={settings} showToast={showToast} askConfirm={askConfirm} />}
+        {activeTab === "calendar" && <CalendarView stays={stays} onUpdate={fetchData} settings={settings} showToast={showToast} askConfirm={askConfirm} />}
         {activeTab === "clients" && <ClientsView clients={clients} cats={cats} stays={stays} settings={settings} onUpdate={fetchData} showToast={showToast} askConfirm={askConfirm} />}
         {activeTab === "cats" && <CatsView cats={cats} clients={clients} onUpdate={fetchData} showToast={showToast} askConfirm={askConfirm} />}
-        {activeTab === "stats" && <StatsView stats={stats} />}
-        {activeTab === "reports" && <ReportsView stays={[...stays, ...archivedStays]} onUpdate={fetchData} settings={settings} showToast={showToast} askConfirm={askConfirm} />}
-        {activeTab === "contracts" && <ContractsView stays={[...stays, ...archivedStays]} settings={settings} onUpdate={fetchData} showToast={showToast} askConfirm={askConfirm} />}
+        {activeTab === "stats" && (
+          <StatsView 
+            stats={stats} 
+            onNavigateToInvoices={(month) => {
+              setAllInvoicesTabMonth(month);
+              setActiveTab("all-invoices");
+            }} 
+          />
+        )}
+        {activeTab === "reports" && <ReportsView stays={stays} onUpdate={fetchData} settings={settings} showToast={showToast} askConfirm={askConfirm} />}
+        {activeTab === "contracts" && <ContractsView stays={stays} settings={settings} onUpdate={fetchData} showToast={showToast} askConfirm={askConfirm} />}
+        {activeTab === "all-invoices" && (
+          <AllInvoicesView 
+            settings={settings} 
+            onUpdate={fetchData} 
+            stays={stays} 
+            showToast={showToast} 
+            askConfirm={askConfirm}
+            initialMonth={allInvoicesTabMonth}
+            onClearInitialMonth={() => setAllInvoicesTabMonth(null)}
+          />
+        )}
         {activeTab === "settings" && <SettingsView settings={settings} onUpdate={fetchData} showToast={showToast} askConfirm={askConfirm} />}
       </main>
 
@@ -529,7 +580,7 @@ export default function App() {
   );
 }
 
-function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToast, askConfirm }: { stays: Stay[], cats: Cat[], onUpdate: () => void, isArchive?: boolean, settings: Settings, showToast: (m: string, t?: 'success' | 'error') => void, askConfirm: (t: string, m: string, c: () => void, d?: boolean) => void }) {
+function StaysView({ stays, cats, onUpdate, settings, showToast, askConfirm }: { stays: Stay[], cats: Cat[], onUpdate: () => void, settings: Settings, showToast: (m: string, t?: 'success' | 'error') => void, askConfirm: (t: string, m: string, c: () => void, d?: boolean) => void }) {
   const [isAdding, setIsAdding] = useState(false);
   const [selectedStay, setSelectedStay] = useState<Stay | null>(null);
 
@@ -554,7 +605,6 @@ function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToa
     return !stays.some(s => {
       if (s.id === excludeStayId) return false;
       if (s.box_number !== box) return false;
-      if (s.is_archived) return false;
       
       const sArrival = s.arrival_date;
       const sDeparture = s.actual_departure || s.planned_departure;
@@ -639,13 +689,13 @@ function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToa
 
   const today = format(new Date(), "yyyy-MM-dd");
   const upcomingStays = stays
-    .filter(s => s.arrival_date >= today && !s.is_archived)
+    .filter(s => s.arrival_date >= today)
     .sort((a, b) => a.arrival_date.localeCompare(b.arrival_date));
 
   return (
     <div className="space-y-6">
       {/* Upcoming Stays Section */}
-      {!isArchive && upcomingStays.length > 0 && (
+      {upcomingStays.length > 0 && (
         <section className="bg-emerald-50 p-6 rounded-2xl border border-emerald-100">
           <div className="flex items-center gap-2 mb-4">
             <Calendar className="text-emerald-600" size={20} />
@@ -689,7 +739,7 @@ function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToa
       )}
 
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <h2 className="text-2xl font-bold">{isArchive ? "Archives des Séjours" : "Suivi des Séjours"}</h2>
+        <h2 className="text-2xl font-bold">Suivi des Séjours</h2>
         <div className="flex flex-wrap gap-2 w-full sm:w-auto">
           <input 
             type="month" 
@@ -697,14 +747,12 @@ function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToa
             value={filterMonth} 
             onChange={e => setFilterMonth(e.target.value)} 
           />
-          {!isArchive && (
-            <button 
-              onClick={() => { setIsAdding(true); setFormData({ ...formData, cat_id: cats[0]?.id || "" }); }}
-              className="flex-1 sm:flex-initial bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors text-sm font-bold"
-            >
-              <Plus size={18} /> Nouveau Séjour
-            </button>
-          )}
+          <button 
+            onClick={() => { setIsAdding(true); setFormData({ ...formData, cat_id: cats[0]?.id || "" }); }}
+            className="flex-1 sm:flex-initial bg-emerald-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors text-sm font-bold"
+          >
+            <Plus size={18} /> Nouveau Séjour
+          </button>
         </div>
       </div>
 
@@ -796,6 +844,9 @@ function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToa
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="font-bold text-lg">{stay.cat_name}</h3>
+                    {(stay.actual_departure || stay.planned_departure) < today && (
+                      <span className="text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded font-bold uppercase">Terminé</span>
+                    )}
                     <span className="text-[10px] bg-stone-100 text-stone-500 px-1.5 py-0.5 rounded font-bold uppercase">ID: {stay.id}</span>
                     <span className="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded font-bold uppercase">{stay.cat_species}</span>
                     {(stay.cat_age || stay.cat_birth_date) && <span className="text-[10px] bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded font-bold uppercase">{stay.cat_age || calculateAge(stay.cat_birth_date || "")}</span>}
@@ -829,7 +880,7 @@ function StaysView({ stays, cats, onUpdate, isArchive = false, settings, showToa
               <div className="mt-6 pt-6 border-t border-stone-100 grid grid-cols-1 lg:grid-cols-2 gap-8">
                 <HealthSection stay={stay} onUpdate={onUpdate} showToast={showToast} askConfirm={askConfirm} />
                 <MediaSection stay={stay} showToast={showToast} askConfirm={askConfirm} />
-                <InvoiceSection stay={stay} settings={settings} showToast={showToast} askConfirm={askConfirm} />
+                <InvoiceSection stay={stay} settings={settings} showToast={showToast} askConfirm={askConfirm} onUpdate={onUpdate} />
                 <StayDetailsSection stay={stay} onUpdate={onUpdate} settings={settings} stays={stays} showToast={showToast} askConfirm={askConfirm} />
               </div>
             )}
@@ -1091,12 +1142,25 @@ function MediaSection({ stay, showToast, askConfirm }: { stay: Stay, showToast: 
   );
 }
 
-function InvoiceSection({ stay, settings, showToast, askConfirm }: { stay: Stay, settings: Settings, showToast: (m: string, t?: 'success' | 'error') => void, askConfirm: (t: string, m: string, c: () => void, d?: boolean) => void }) {
+function InvoiceSection({ stay, settings, showToast, askConfirm, onUpdate }: { stay: Stay, settings: Settings, showToast: (m: string, t?: 'success' | 'error') => void, askConfirm: (t: string, m: string, c: () => void, d?: boolean) => void, onUpdate: () => void }) {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
-  const [formData, setFormData] = useState({ amount: 0, service_type: "Pension complète", arrival_date: stay.arrival_date, departure_date: stay.actual_departure || stay.planned_departure });
+  const [formData, setFormData] = useState({ 
+    amount: 0, 
+    service_type: "Pension complète", 
+    arrival_date: stay.arrival_date, 
+    departure_date: stay.actual_departure || stay.planned_departure,
+    type: 'standard' as 'standard' | 'deposit' | 'final',
+    status: 'draft' as InvoiceStatus,
+    payment_method: "",
+    deposit_amount: 0,
+    related_invoice_number: "",
+    created_at: format(new Date(), "yyyy-MM-dd")
+  });
   const [status, setStatus] = useState("");
+  const [calcTotal, setCalcTotal] = useState(0);
+  const [calcPercent, setCalcPercent] = useState(30);
 
   useEffect(() => { fetchInvoices(); }, [stay.id]);
 
@@ -1105,20 +1169,27 @@ function InvoiceSection({ stay, settings, showToast, askConfirm }: { stay: Stay,
     setInvoices(await res.json());
   };
 
+  const depositInvoices = useMemo(() => invoices.filter(inv => inv.type === 'deposit'), [invoices]);
+  const paymentMethods = settings.payment_methods || ["CB", "Chèque", "Espèces", "Virement"];
+
   const handleSave = async () => {
     setStatus("Génération...");
     try {
       const url = editingInvoice ? `/api/invoices/${editingInvoice.id}` : "/api/invoices";
       const method = editingInvoice ? "PUT" : "POST";
       
-      // Note: We need to add a PUT endpoint for invoices in server.ts if we want to edit them.
-      // For now, let's assume we can only create or delete as per current server.ts.
-      // Wait, the user says "la facturation ne s'edite pas". I should add the PUT route.
-      
+      const payload = { 
+        ...formData, 
+        stay_id: stay.id, 
+        owner_name: stay.owner_name,
+        cat_name: stay.cat_name,
+        reference_total: formData.type === 'deposit' ? calcTotal : undefined
+      };
+
       const response = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...formData, stay_id: stay.id, created_at: editingInvoice ? editingInvoice.created_at : format(new Date(), "yyyy-MM-dd") })
+        body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
@@ -1130,6 +1201,7 @@ function InvoiceSection({ stay, settings, showToast, askConfirm }: { stay: Stay,
       showToast(editingInvoice ? "Facture modifiée !" : "Facture générée !");
       setIsAdding(false);
       setEditingInvoice(null);
+      onUpdate(); // Update central stats if needed
       fetchInvoices();
     } catch (error: any) {
       console.error("Save error:", error);
@@ -1145,6 +1217,9 @@ function InvoiceSection({ stay, settings, showToast, askConfirm }: { stay: Stay,
       const doc = new jsPDF();
       
       // Header - Company Info
+      // ... (rest of PDF logic is the same, just keep it or update slightly if needed to show status)
+      // Actually, let's update it to show status and payment method on PDF
+      
       doc.setFontSize(10);
       doc.setTextColor(0, 0, 0);
       doc.setFont("helvetica", "bold");
@@ -1159,23 +1234,23 @@ function InvoiceSection({ stay, settings, showToast, askConfirm }: { stay: Stay,
       if (settings.company_siret) { doc.text(`SIRET : ${settings.company_siret}`, 20, yPos); yPos += 4; }
       if (settings.company_acaced) { doc.text(`ACACED : ${settings.company_acaced}`, 20, yPos); yPos += 4; }
       
-      // Fallback if no settings
-      if (!settings.company_name && !settings.company_address) {
-        doc.text("181 chemin vert 59480 la bassée", 20, 25);
-        doc.text("SIRET : 831980263", 20, 29);
-        doc.text("RCS Lille Métropole", 20, 33);
-      }
-      
       doc.setFontSize(22);
       doc.setTextColor(16, 185, 129); // Emerald-500
       doc.setFont("helvetica", "bold");
-      doc.text("FACTURE", 105, 25, { align: "center" });
+      const title = invoice.type === 'deposit' ? "FACTURE D'ACOMPTE" : "FACTURE";
+      doc.text(title, 105, 25, { align: "center" });
       
       doc.setFontSize(10);
       doc.setTextColor(100, 100, 100);
       doc.setFont("helvetica", "normal");
       doc.text(`Date: ${formatDateSafe(invoice.created_at)}`, 190, 20, { align: "right" });
       doc.text(`Facture N°: ${invoice.invoice_number || invoice.id}`, 190, 25, { align: "right" });
+      if (invoice.status) {
+        const statusConfig = getInvoiceStatusConfig(invoice.status, settings);
+        const s = statusConfig;
+        doc.setFontSize(9);
+        doc.text(`Statut: ${s.label.toUpperCase()}`, 190, 30, { align: "right" });
+      }
       
       // Client Info
       doc.setFontSize(12);
@@ -1193,7 +1268,7 @@ function InvoiceSection({ stay, settings, showToast, askConfirm }: { stay: Stay,
       doc.text("DÉTAILS SÉJOUR:", 120, 60);
       doc.setFont("helvetica", "normal");
       doc.text(`Animal: ${stay.cat_name || "Animal"}`, 120, 67);
-      doc.text(`Période: ${formData.arrival_date} au ${formData.departure_date}`, 120, 74);
+      doc.text(`Période: ${invoice.arrival_date || stay.arrival_date} au ${invoice.departure_date || stay.actual_departure || stay.planned_departure}`, 120, 74);
       
       doc.setFontSize(10);
       doc.setFont("helvetica", "bold");
@@ -1204,23 +1279,32 @@ function InvoiceSection({ stay, settings, showToast, askConfirm }: { stay: Stay,
       doc.text(`Leucose (L): ${formatDateSafe(stay.cat_vaccine_l_date, "___/___/_____")}`, 120, 91);
       doc.text(`Parasitaire: ${formatDateSafe(stay.cat_parasite_treatment_date, "___/___/_____")}`, 120, 96);
 
-      // Calculate days and unit price
-      const start = new Date(formData.arrival_date);
-      const end = new Date(formData.departure_date);
+      // Table
+      const start = new Date(invoice.arrival_date || stay.arrival_date);
+      const end = new Date(invoice.departure_date || stay.actual_departure || stay.planned_departure);
       const diffTime = Math.abs(end.getTime() - start.getTime());
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) || 1;
-      const unitPrice = (invoice.amount / diffDays).toFixed(2);
+      
+      const rows = [[
+        invoice.service_type, 
+        invoice.type === 'deposit' ? '1' : diffDays.toString(), 
+        invoice.type === 'deposit' ? `${invoice.amount.toFixed(2)} €` : `${(invoice.amount / diffDays).toFixed(2)} €`, 
+        `${invoice.amount.toFixed(2)} €`
+      ]];
 
-      // Table
+      if (invoice.type === 'final' && invoice.deposit_amount) {
+        rows.push([
+          `Acompte (Facture N° ${invoice.related_invoice_number || 'N/A'})`,
+          '1',
+          `-${invoice.deposit_amount.toFixed(2)} €`,
+          `-${invoice.deposit_amount.toFixed(2)} €`
+        ]);
+      }
+
       autoTable(doc, {
         startY: 105,
-        head: [['Description', 'Quantité (Jours)', 'Prix Unitaire', 'Total']],
-        body: [[
-          invoice.service_type, 
-          diffDays.toString(), 
-          `${unitPrice} €`, 
-          `${invoice.amount.toFixed(2)} €`
-        ]],
+        head: [['Description', 'Quantité', 'Prix Unitaire', 'Total']],
+        body: rows,
         theme: 'striped',
         headStyles: { fillColor: [16, 185, 129] },
         columnStyles: {
@@ -1231,8 +1315,17 @@ function InvoiceSection({ stay, settings, showToast, askConfirm }: { stay: Stay,
       });
 
       const finalY = (doc as any).lastAutoTable.finalY || 110;
+      
+      doc.setFontSize(11);
       doc.setFont("helvetica", "bold");
-      doc.text(`TOTAL À PAYER: ${invoice.amount.toFixed(2)} €`, 190, finalY + 20, { align: "right" });
+      const totalAmount = invoice.type === 'final' ? (invoice.amount - (invoice.deposit_amount || 0)) : invoice.amount;
+      doc.text(`TOTAL : ${totalAmount.toFixed(2)} €`, 190, finalY + 15, { align: "right" });
+
+      if (invoice.payment_method) {
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "normal");
+        doc.text(`Moyen de paiement: ${invoice.payment_method}`, 20, finalY + 10);
+      }
 
       // Footer
       doc.setFontSize(8);
@@ -1251,9 +1344,25 @@ function InvoiceSection({ stay, settings, showToast, askConfirm }: { stay: Stay,
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h4 className="font-bold flex items-center gap-2"><FileText size={18} className="text-emerald-500" /> Facturation</h4>
-        <button onClick={() => setIsAdding(!isAdding)} className="text-emerald-600 text-sm font-bold flex items-center gap-1">
-          <Plus size={16} /> Créer facture
-        </button>
+        {!isAdding && !editingInvoice && (
+          <button onClick={() => {
+            setIsAdding(true);
+            setFormData({
+              amount: 0,
+              service_type: "Pension complète",
+              arrival_date: stay.arrival_date,
+              departure_date: stay.actual_departure || stay.planned_departure,
+              type: 'standard',
+              status: 'draft',
+              payment_method: "",
+              deposit_amount: 0,
+              related_invoice_number: "",
+              created_at: format(new Date(), "yyyy-MM-dd")
+            });
+          }} className="text-emerald-600 text-sm font-bold flex items-center gap-1">
+            <Plus size={16} /> Créer facture
+          </button>
+        )}
       </div>
 
       {status && (
@@ -1262,66 +1371,242 @@ function InvoiceSection({ stay, settings, showToast, askConfirm }: { stay: Stay,
         </div>
       )}
 
-      {isAdding || editingInvoice ? (
+      {(isAdding || editingInvoice) && (
         <div className="bg-stone-50 p-4 rounded-xl space-y-3 border border-stone-200">
-          <input 
-            type="number" 
-            placeholder="Montant (€)" 
-            className="w-full p-2 text-sm border border-stone-200 rounded-lg" 
-            value={isNaN(formData.amount) ? "" : formData.amount} 
-            onChange={e => setFormData({ ...formData, amount: parseFloat(e.target.value) })} 
-          />
-          <input placeholder="Type de prestation" className="w-full p-2 text-sm border border-stone-200 rounded-lg" value={formData.service_type} onChange={e => setFormData({ ...formData, service_type: e.target.value })} />
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-stone-400 uppercase">Type</label>
+              <select 
+                className="w-full p-2 text-sm border border-stone-200 rounded-lg bg-white"
+                value={formData.type}
+                onChange={e => setFormData({ ...formData, type: e.target.value as any })}
+              >
+                <option value="standard">Standard</option>
+                <option value="deposit">Acompte</option>
+                <option value="final">Finale</option>
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-stone-400 uppercase">Statut</label>
+              <select 
+                className="w-full p-2 text-sm border border-stone-200 rounded-lg bg-white"
+                value={formData.status}
+                onChange={e => setFormData({ ...formData, status: e.target.value as any })}
+              >
+                {Object.entries(settings.invoice_statuses || DEFAULT_INVOICE_STATUS_LABELS).map(([val, config]) => (
+                  <option key={val} value={val}>{config.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-stone-400 uppercase">Prestation</label>
+              <input placeholder="Ex: Pension complète" className="w-full p-2 text-sm border border-stone-200 rounded-lg" value={formData.service_type} onChange={e => setFormData({ ...formData, service_type: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-stone-400 uppercase">Mode de paiement</label>
+              <select 
+                className="w-full p-2 text-sm border border-stone-200 rounded-lg bg-white"
+                value={formData.payment_method}
+                onChange={e => setFormData({ ...formData, payment_method: e.target.value })}
+              >
+                <option value="">-- Sélectionner --</option>
+                {paymentMethods.map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-stone-400 uppercase">Date de facturation</label>
+            <input 
+              type="date"
+              className="w-full p-2 text-sm border border-stone-200 rounded-lg bg-white"
+              value={formData.created_at}
+              onChange={e => setFormData({ ...formData, created_at: e.target.value })}
+            />
+          </div>
+
+          {formData.type === 'deposit' && (
+            <div className="grid grid-cols-2 gap-2 bg-indigo-50 p-3 rounded-xl border border-indigo-100">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-indigo-700 uppercase">Montant Total de réf.</label>
+                <input 
+                  type="number" 
+                  className="w-full p-2 text-sm border border-indigo-200 rounded-lg bg-white" 
+                  value={calcTotal || ""} 
+                  onChange={e => {
+                    const total = parseFloat(e.target.value) || 0;
+                    setCalcTotal(total);
+                    setFormData({ ...formData, amount: parseFloat(((total * calcPercent) / 100).toFixed(2)) });
+                  }} 
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-indigo-700 uppercase">Acompte %</label>
+                <div className="flex items-center gap-1">
+                  <input 
+                    type="number" 
+                    className="w-full p-2 text-sm border border-indigo-200 rounded-lg bg-white" 
+                    value={calcPercent} 
+                    onChange={e => {
+                      const pct = parseFloat(e.target.value) || 0;
+                      setCalcPercent(pct);
+                      setFormData({ ...formData, amount: parseFloat(((calcTotal * pct) / 100).toFixed(2)) });
+                    }} 
+                  />
+                  <span className="font-bold text-indigo-700">%</span>
+                </div>
+              </div>
+              <p className="col-span-2 text-[9px] text-indigo-500 italic mt-1">Saisir le total et le % pour calculer l'acompte automatiquement below.</p>
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <label className="text-[10px] font-bold text-stone-400 uppercase">{formData.type === 'deposit' ? 'Montant de l\'acompte' : 'Montant Total'}</label>
+            <div className="relative">
+              <input 
+                type="number" 
+                className="w-full p-2 text-sm border border-stone-200 rounded-lg" 
+                value={isNaN(formData.amount) ? "" : formData.amount} 
+                onChange={e => setFormData({ ...formData, amount: parseFloat(e.target.value) })} 
+              />
+              <span className="absolute right-3 top-2 text-stone-300 pointer-events-none">€</span>
+            </div>
+          </div>
+
+          {formData.type === 'final' && depositInvoices.length > 0 && (
+            <div className="space-y-1 bg-emerald-50 p-2 rounded-lg border border-emerald-100">
+              <label className="text-[10px] font-bold text-emerald-700 uppercase">Déduire un acompte</label>
+              <select 
+                className="w-full p-2 text-sm border border-emerald-200 rounded-lg bg-white outline-none focus:ring-2 focus:ring-emerald-500 transition-all font-bold text-stone-700"
+                onChange={(e) => {
+                  const inv = depositInvoices.find(i => i.id === e.target.value);
+                  if (inv) {
+                    setFormData({ 
+                      ...formData, 
+                      deposit_amount: inv.amount, 
+                      related_invoice_number: inv.invoice_number,
+                      amount: inv.reference_total || formData.amount
+                    });
+                  } else {
+                    setFormData({ ...formData, deposit_amount: 0, related_invoice_number: "", amount: 0 });
+                  }
+                }}
+              >
+                <option value="">-- Sélectionner l'acompte --</option>
+                {depositInvoices.map(inv => (
+                  <option key={inv.id} value={inv.id}>Facture {inv.invoice_number} ({inv.amount}€)</option>
+                ))}
+              </select>
+              {formData.deposit_amount > 0 && (
+                <div className="mt-2 p-2 bg-white rounded-lg border border-emerald-100 text-[10px] font-medium text-emerald-700 shadow-sm">
+                  <div className="flex justify-between">
+                    <span>Acompte déduit :</span>
+                    <span className="font-bold text-red-500">-{formData.deposit_amount.toFixed(2)} €</span>
+                  </div>
+                  <div className="flex justify-between font-bold border-t border-emerald-50 mt-1 pt-1 text-sm">
+                    <span>RESTE À PAYER :</span>
+                    <span>{(formData.amount - formData.deposit_amount).toFixed(2)} €</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-stone-400 uppercase">Entrée</label>
+              <label className="text-[10px] font-bold text-stone-400 uppercase">Du</label>
               <input type="date" className="w-full p-2 text-sm border border-stone-200 rounded-lg" value={formData.arrival_date} onChange={e => setFormData({ ...formData, arrival_date: e.target.value })} />
             </div>
             <div className="space-y-1">
-              <label className="text-[10px] font-bold text-stone-400 uppercase">Sortie</label>
+              <label className="text-[10px] font-bold text-stone-400 uppercase">Au</label>
               <input type="date" className="w-full p-2 text-sm border border-stone-200 rounded-lg" value={formData.departure_date} onChange={e => setFormData({ ...formData, departure_date: e.target.value })} />
             </div>
           </div>
-          <div className="flex justify-end gap-2">
+
+          <div className="flex justify-end gap-2 pt-2">
             <button type="button" onClick={() => { setIsAdding(false); setEditingInvoice(null); }} className="text-xs font-bold text-stone-500">Annuler</button>
-            <button type="button" onClick={handleSave} className="bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs font-bold">{editingInvoice ? "Modifier" : "Générer"}</button>
+            <button type="button" onClick={handleSave} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-xs font-bold">{editingInvoice ? "Modifier" : "Générer la facture"}</button>
           </div>
         </div>
-      ) : null}
+      )}
 
       <div className="space-y-2">
-        {invoices.map(inv => (
-          <div key={inv.id} className="flex justify-between items-center p-3 bg-white border border-stone-100 rounded-xl group relative">
-            <div>
-              <p className="font-bold text-sm">{inv.amount} € <span className="text-stone-400 font-normal ml-2 text-xs">#{inv.invoice_number || inv.id}</span></p>
-              <p className="text-[10px] text-stone-400 uppercase font-bold">{inv.service_type}</p>
+        {invoices.map(inv => {
+          const statusConfig = getInvoiceStatusConfig(inv.status, settings);
+          return (
+            <div key={inv.id} className={`flex justify-between items-center p-3 bg-white border border-stone-100 rounded-xl group relative ${inv.type === 'deposit' ? 'border-l-4 border-l-orange-400' : inv.type === 'final' ? 'border-l-4 border-l-emerald-600' : ''}`}>
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="font-bold text-sm">
+                    {inv.type === 'final' ? (inv.amount - (inv.deposit_amount || 0)).toFixed(2) : inv.amount.toFixed(2)} €
+                  </p>
+                  {inv.type === 'deposit' && <span className="text-[8px] bg-orange-100 text-orange-700 px-1 rounded font-bold uppercase">Acompte</span>}
+                  {inv.type === 'final' && <span className="text-[8px] bg-emerald-100 text-emerald-700 px-1 rounded font-bold uppercase">Finale</span>}
+                  <span className={`text-[8px] ${statusConfig.bg} ${statusConfig.color} px-1 rounded font-bold uppercase`}>{statusConfig.label}</span>
+                </div>
+                <p className="text-[10px] text-stone-400 uppercase font-bold flex items-center gap-1">
+                  {inv.invoice_number} • {inv.service_type}
+                  {inv.payment_method && <span className="text-stone-500 italic">({inv.payment_method})</span>}
+                  {inv.related_invoice_number && <span className="text-emerald-600 ml-1">(Réf: {inv.related_invoice_number})</span>}
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button title="Télécharger" onClick={() => generatePDF(inv)} className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"><Download size={18} /></button>
+                <button 
+                  title="Modifier"
+                  onClick={() => { 
+                    setEditingInvoice(inv); 
+                    setFormData({ 
+                      amount: inv.amount, 
+                      service_type: inv.service_type, 
+                      arrival_date: inv.arrival_date || stay.arrival_date, 
+                      departure_date: inv.departure_date || stay.actual_departure || stay.planned_departure,
+                      type: inv.type || 'standard',
+                      status: inv.status || 'draft',
+                      payment_method: inv.payment_method || "",
+                      deposit_amount: inv.deposit_amount || 0,
+                      related_invoice_number: inv.related_invoice_number || "",
+                      created_at: inv.created_at
+                    }); 
+                  }} 
+                  className="p-2 text-stone-400 hover:text-emerald-600"
+                >
+                  <Edit size={18} />
+                </button>
+                <button 
+                  title="Supprimer"
+                  onClick={() => { 
+                    askConfirm(
+                      "Supprimer la facture ?", 
+                      "Supprimer définitivement cette facture ?",
+                      async () => {
+                        try {
+                          const res = await fetch(`/api/invoices/${inv.id}`, { method: "DELETE" });
+                          if (!res.ok) {
+                            const err = await res.json();
+                            throw new Error(err.error || "Erreur lors de la suppression");
+                          }
+                          showToast("Facture supprimée !");
+                          fetchInvoices();
+                          onUpdate();
+                        } catch (err: any) {
+                          showToast("Erreur: " + err.message, "error");
+                        }
+                      },
+                      true
+                    );
+                  }} className="p-2 text-stone-300 hover:text-red-600">
+                    <Trash2 size={18} />
+                  </button>
+              </div>
             </div>
-            <div className="flex gap-2">
-              <button onClick={() => generatePDF(inv)} className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"><Download size={18} /></button>
-              <button onClick={() => { setEditingInvoice(inv); setFormData({ amount: inv.amount, service_type: inv.service_type, arrival_date: stay.arrival_date, departure_date: stay.actual_departure || stay.planned_departure }); }} className="p-2 text-stone-400 hover:text-emerald-600"><Edit size={18} /></button>
-              <button onClick={() => { 
-                askConfirm(
-                  "Supprimer la facture ?", 
-                  "Supprimer définitivement cette facture ?",
-                  async () => {
-                    try {
-                      const res = await fetch(`/api/invoices/${inv.id}`, { method: "DELETE" });
-                      if (!res.ok) {
-                        const err = await res.json();
-                        throw new Error(err.error || "Erreur lors de la suppression");
-                      }
-                      showToast("Facture supprimée !");
-                      await fetchInvoices();
-                    } catch (err: any) {
-                      showToast("Erreur: " + err.message, "error");
-                    }
-                  },
-                  true
-                );
-              }} className="p-2 text-stone-300 hover:text-red-600"><Trash2 size={18} /></button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -1356,7 +1641,6 @@ function StayDetailsSection({ stay, onUpdate, settings, stays, showToast, askCon
     return !stays.some(s => {
       if (s.id === excludeStayId) return false;
       if (s.box_number !== box) return false;
-      if (s.is_archived) return false;
       
       const sArrival = s.arrival_date;
       const sDeparture = s.actual_departure || s.planned_departure;
@@ -1536,16 +1820,6 @@ function StayDetailsSection({ stay, onUpdate, settings, stays, showToast, askCon
               />
             </div>
           </div>
-        </div>
-
-        <div className="col-span-2 flex items-center gap-2">
-          <input 
-            type="checkbox" 
-            id={`archived-${stay.id}`}
-            checked={formData.is_archived} 
-            onChange={e => setFormData({ ...formData, is_archived: e.target.checked })} 
-          />
-          <label htmlFor={`archived-${stay.id}`} className="text-sm font-bold text-stone-600">Séjour terminé (Archiver)</label>
         </div>
       </div>
       <div className="flex gap-4 pt-4 border-t border-stone-100">
@@ -2331,10 +2605,14 @@ function SettingsView({ settings, onUpdate, showToast, askConfirm }: { settings:
     company_siret: settings.company_siret || "",
     company_acaced: settings.company_acaced || ""
   });
+  const [newPaymentMethod, setNewPaymentMethod] = useState("");
+  const paymentMethods = settings.payment_methods || ["CB", "Chèque", "Espèces", "Virement"];
+  const [tempStatuses, setTempStatuses] = useState<Record<string, InvoiceStatusConfig>>(settings.invoice_statuses || DEFAULT_INVOICE_STATUS_LABELS);
 
   useEffect(() => {
     setGeneralConditions(settings.general_conditions || "");
     setTotalBoxes(settings.total_boxes || "3");
+    setTempStatuses(settings.invoice_statuses || DEFAULT_INVOICE_STATUS_LABELS);
     setCompanyInfo({
       company_name: settings.company_name || "",
       company_owner: settings.company_owner || "",
@@ -2611,6 +2889,86 @@ function SettingsView({ settings, onUpdate, showToast, askConfirm }: { settings:
         </div>
       </section>
 
+      <section className="bg-white p-6 rounded-2xl shadow-sm border border-stone-200 space-y-4">
+        <h3 className="font-bold flex items-center gap-2"><CreditCard size={20} className="text-emerald-600" /> Modes de Paiement</h3>
+        <div className="flex flex-wrap gap-2">
+          {paymentMethods.map(m => (
+            <div key={m} className="flex items-center gap-2 bg-stone-50 border border-stone-200 px-3 py-1.5 rounded-xl">
+              <span className="text-sm font-medium text-stone-600">{m}</span>
+              <button 
+                onClick={() => {
+                  const updated = paymentMethods.filter(p => p !== m);
+                  handleSaveSetting("payment_methods", JSON.stringify(updated));
+                }}
+                className="text-stone-300 hover:text-red-500 transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input 
+            placeholder="Ajouter un mode (ex: PayPal)" 
+            className="flex-1 p-2 border border-stone-200 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none" 
+            value={newPaymentMethod}
+            onChange={e => setNewPaymentMethod(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && newPaymentMethod.trim()) {
+                const updated = [...paymentMethods, newPaymentMethod.trim()];
+                handleSaveSetting("payment_methods", JSON.stringify(updated));
+                setNewPaymentMethod("");
+              }
+            }}
+          />
+          <button 
+            onClick={() => {
+              if (newPaymentMethod.trim()) {
+                const updated = [...paymentMethods, newPaymentMethod.trim()];
+                handleSaveSetting("payment_methods", JSON.stringify(updated));
+                setNewPaymentMethod("");
+              }
+            }}
+            className="bg-stone-800 text-white px-4 py-2 rounded-xl text-xs font-bold"
+          >
+            Ajouter
+          </button>
+        </div>
+        <p className="text-xs text-stone-400 italic">Ces modes apparaîtront lors de la création d'une facture.</p>
+      </section>
+
+      <section className="bg-white p-6 rounded-2xl shadow-sm border border-stone-200 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold flex items-center gap-2"><CheckCircle2 size={20} className="text-emerald-600" /> Libellés des Statuts</h3>
+          <button 
+            onClick={() => handleSaveSetting("invoice_statuses", JSON.stringify(tempStatuses))}
+            className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-sm hover:bg-emerald-700 transition-all"
+          >
+            Enregistrer les libellés
+          </button>
+        </div>
+        <p className="text-xs text-stone-400">Personnalisez les noms des statuts de vos factures.</p>
+        
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+          {Object.entries(tempStatuses).map(([key, config]: [string, any]) => (
+            <div key={key} className="flex flex-col gap-1 p-3 bg-stone-50 rounded-xl border border-stone-100">
+              <label className="text-[10px] font-bold text-stone-400 uppercase">Clé : {key}</label>
+              <input 
+                type="text" 
+                className={`w-full p-2 border border-stone-200 rounded-lg text-sm font-bold bg-white focus:ring-2 focus:ring-emerald-500 outline-none ${config.color}`}
+                value={config.label}
+                onChange={(e) => {
+                  setTempStatuses({
+                    ...tempStatuses,
+                    [key]: { ...config, label: e.target.value }
+                  });
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      </section>
+
       <section className="bg-white p-6 rounded-2xl shadow-sm border border-stone-200 space-y-6">
         <h3 className="font-bold flex items-center gap-2"><Save size={20} className="text-emerald-600" /> Sauvegarde & Restauration</h3>
         
@@ -2729,8 +3087,7 @@ function CalendarView({ stays, onUpdate, settings, showToast, askConfirm }: { st
     return stays.filter(s => s.box_number === box && s.arrival_date <= dateStr && (s.actual_departure || s.planned_departure) >= dateStr);
   };
 
-  const getBoxStyle = (boxNumber: number, isArchived: boolean) => {
-    if (isArchived) return 'bg-stone-100 text-stone-500';
+  const getBoxStyle = (boxNumber: number) => {
     const styles = [
       'bg-emerald-100 text-emerald-700 hover:bg-emerald-200',
       'bg-blue-100 text-blue-700 hover:bg-blue-200',
@@ -2812,7 +3169,7 @@ function CalendarView({ stays, onUpdate, settings, showToast, askConfirm }: { st
                         <button 
                           key={stay.id} 
                           onClick={() => setSelectedStay(stay)}
-                          className={`w-full text-left text-[10px] p-1 rounded font-bold truncate transition-colors ${getBoxStyle(stay.box_number, stay.is_archived)}`}
+                          className={`w-full text-left text-[10px] p-1 rounded font-bold truncate transition-colors ${getBoxStyle(stay.box_number)}`}
                         >
                           {stay.cat_name} (Box {stay.box_number})
                         </button>
@@ -2879,7 +3236,7 @@ function CalendarView({ stays, onUpdate, settings, showToast, askConfirm }: { st
   );
 }
 
-function StatsView({ stats }: { stats: any }) {
+function StatsView({ stats, onNavigateToInvoices }: { stats: any, onNavigateToInvoices: (month: string) => void }) {
   const [timeRange, setTimeRange] = useState<"month" | "quarter" | "year">("month");
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), "yyyy-MM"));
   const [selectedQuarter, setSelectedQuarter] = useState(Math.floor((new Date().getMonth() + 3) / 3));
@@ -3001,10 +3358,17 @@ function StatsView({ stats }: { stats: any }) {
           <h3 className="font-bold mb-6 flex items-center gap-2"><FileText size={18} /> Historique du CA</h3>
           <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
             {stats.revenue.map((r: any) => (
-              <div key={r.month} className="flex justify-between items-center p-3 bg-stone-50 rounded-xl">
-                <span className="font-bold text-stone-600">{r.month}</span>
-                <span className="font-bold text-emerald-600">{r.total} €</span>
-              </div>
+              <button 
+                key={r.month} 
+                onClick={() => onNavigateToInvoices(r.month)}
+                className="w-full flex justify-between items-center p-3 bg-stone-50 hover:bg-emerald-50 hover:ring-1 hover:ring-emerald-200 rounded-xl transition-all group"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-stone-600 group-hover:text-emerald-700">{r.month}</span>
+                  <ExternalLink size={12} className="text-stone-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
+                <span className="font-bold text-emerald-600">{r.total.toFixed(2)} €</span>
+              </button>
             ))}
           </div>
         </div>
@@ -3013,10 +3377,17 @@ function StatsView({ stats }: { stats: any }) {
           <h3 className="font-bold mb-6 flex items-center gap-2"><Calendar size={18} /> Activité par mois</h3>
           <div className="space-y-4 max-h-96 overflow-y-auto pr-2">
             {stats.occupancy.map((o: any) => (
-              <div key={o.month} className="flex justify-between items-center p-3 bg-stone-50 rounded-xl">
-                <span className="font-bold text-stone-600">{o.month}</span>
+              <button 
+                key={o.month} 
+                onClick={() => onNavigateToInvoices(o.month)}
+                className="w-full flex justify-between items-center p-3 bg-stone-50 hover:bg-blue-50 hover:ring-1 hover:ring-blue-200 rounded-xl transition-all group"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-stone-600 group-hover:text-blue-700">{o.month}</span>
+                  <ExternalLink size={12} className="text-stone-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </div>
                 <span className="font-bold text-blue-600">{o.stays_count} jours occupés</span>
-              </div>
+              </button>
             ))}
           </div>
         </div>
@@ -3029,7 +3400,6 @@ function ReportsView({ stays, onUpdate, settings, showToast, askConfirm }: { sta
   const [reportTab, setReportTab] = useState<"register" | "health">("register");
   const [filterDate, setFilterDate] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  const [showArchived, setShowArchived] = useState(true);
   const [selectedStayForEdit, setSelectedStayForEdit] = useState<Stay | null>(null);
   const [healthReports, setHealthReports] = useState<any[]>([]);
 
@@ -3059,7 +3429,7 @@ function ReportsView({ stays, onUpdate, settings, showToast, askConfirm }: { sta
 
   useEffect(() => {
     if (reportTab === "health") {
-      fetch(`/api/health-reports?archived=${showArchived}`)
+      fetch(`/api/health-reports?all=true`)
         .then(res => res.json())
         .then(data => {
           if (Array.isArray(data)) setHealthReports(data);
@@ -3067,14 +3437,13 @@ function ReportsView({ stays, onUpdate, settings, showToast, askConfirm }: { sta
         })
         .catch(() => setHealthReports([]));
     }
-  }, [reportTab, stays, showArchived]);
+  }, [reportTab, stays]);
 
   const filtered = stays.filter(s => {
     const matchesDate = (reportTab === "register" && filterDate) ? s.arrival_date.startsWith(filterDate) : true;
     const matchesSearch = s.cat_name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
                          s.owner_name?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesArchive = !!s.is_archived === showArchived;
-    return matchesDate && matchesSearch && matchesArchive;
+    return matchesDate && matchesSearch;
   });
 
   const filteredHealth = healthReports.filter(h => {
@@ -3090,7 +3459,6 @@ function ReportsView({ stays, onUpdate, settings, showToast, askConfirm }: { sta
     doc.setFontSize(10);
     doc.text(`Édité le: ${format(new Date(), "dd/MM/yyyy HH:mm")}`, 14, 30);
     doc.text(`Période: ${filterDate || "Toutes"}`, 14, 35);
-    doc.text(`Statut: ${showArchived ? "Archivés" : "Actifs"}`, 14, 40);
 
     const tableData = filtered.map(s => [
       `#${s.id}`,
@@ -3120,7 +3488,6 @@ function ReportsView({ stays, onUpdate, settings, showToast, askConfirm }: { sta
     doc.text("Suivi de Santé Global", 105, 20, { align: "center" });
     doc.setFontSize(10);
     doc.text(`Édité le: ${format(new Date(), "dd/MM/yyyy HH:mm")}`, 14, 30);
-    doc.text(`Statut: ${showArchived ? "Archivés" : "Actifs"}`, 14, 35);
 
     const tableData = filteredHealth.map(h => [
       `#${h.stay_id}`,
@@ -3156,20 +3523,6 @@ function ReportsView({ stays, onUpdate, settings, showToast, askConfirm }: { sta
           >
             <FileText size={18} /> Imprimer
           </button>
-          <div className="flex items-center gap-2 bg-stone-100 p-1 rounded-lg flex-1 sm:flex-initial">
-            <button 
-              onClick={() => setShowArchived(false)}
-              className={`flex-1 px-3 py-1 rounded-md text-xs font-bold transition-all ${!showArchived ? "bg-white text-emerald-600 shadow-sm" : "text-stone-500"}`}
-            >
-              Actifs
-            </button>
-            <button 
-              onClick={() => setShowArchived(true)}
-              className={`flex-1 px-3 py-1 rounded-md text-xs font-bold transition-all ${showArchived ? "bg-white text-emerald-600 shadow-sm" : "text-stone-500"}`}
-            >
-              Archivés
-            </button>
-          </div>
           {reportTab === "register" && (
             <div className="flex items-center gap-2 flex-1 sm:flex-initial">
               <input 
@@ -3646,6 +3999,320 @@ function ContractsView({ stays, settings, onUpdate, showToast, askConfirm }: { s
             )}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function AllInvoicesView({ settings, onUpdate, stays, showToast, askConfirm, initialMonth, onClearInitialMonth }: { settings: Settings, onUpdate: () => void, stays: Stay[], showToast: (m: string, t?: 'success' | 'error') => void, askConfirm: (t: string, m: string, c: () => void, d?: boolean) => void, initialMonth?: string | null, onClearInitialMonth?: () => void }) {
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filterMonth, setFilterMonth] = useState(initialMonth || format(new Date(), "yyyy-MM"));
+
+  useEffect(() => {
+    if (initialMonth) {
+      setFilterMonth(initialMonth);
+      if (onClearInitialMonth) onClearInitialMonth();
+    }
+  }, [initialMonth]);
+
+  const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [selectedStayId, setSelectedStayId] = useState<string | null>(null);
+  const [isAddingNew, setIsAddingNew] = useState(false);
+  const [searchStay, setSearchStay] = useState("");
+
+  const fetchInvoices = async () => {
+    try {
+      const res = await fetch("/api/invoices/all");
+      setInvoices(await res.json());
+    } catch (err) {
+      showToast("Erreur lors de la récupération des factures", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchInvoices();
+  }, []);
+
+  const filteredInvoices = useMemo(() => {
+    return invoices.filter(inv => {
+      const matchMonth = inv.created_at.startsWith(filterMonth);
+      const matchStatus = filterStatus === "all" || inv.status === filterStatus;
+      return matchMonth && matchStatus;
+    });
+  }, [invoices, filterMonth, filterStatus]);
+
+  const totalCA = useMemo(() => {
+     return filteredInvoices.reduce((acc, inv) => {
+        const isEncashed = !inv.status || inv.status === 'paid' || inv.status === 'partially_paid';
+        if (isEncashed) {
+          const amount = inv.type === 'final' ? (inv.amount - (inv.deposit_amount || 0)) : inv.amount;
+          return acc + amount;
+        }
+        return acc;
+     }, 0);
+  }, [filteredInvoices]);
+
+  const handleQuickPaid = async (inv: Invoice) => {
+    try {
+      const res = await fetch(`/api/invoices/${inv.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...inv, status: 'paid' })
+      });
+      if (!res.ok) throw new Error();
+      showToast("Facture marquée comme Payée !");
+      fetchInvoices();
+      onUpdate();
+    } catch (e) {
+      showToast("Erreur lors de la mise à jour", "error");
+    }
+  };
+
+  if (loading) return <div className="p-8 text-center text-stone-500">Chargement des données comptables...</div>;
+
+  const currentStay = stays.find(s => s.id === selectedStayId);
+
+  return (
+    <div className="space-y-6">
+      {/* Stay Selector Modal for NEW invoice */}
+      {isAddingNew && (
+        <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-[100] animate-in fade-in duration-300">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full p-8 space-y-6 transform animate-in zoom-in-95 duration-200 border border-stone-100">
+            <div className="flex justify-between items-center">
+              <h3 className="text-2xl font-black text-stone-900 tracking-tight">Nouvelle Facture</h3>
+              <button onClick={() => setIsAddingNew(false)} className="p-2 hover:bg-stone-50 rounded-full transition-colors"><X size={24} className="text-stone-400" /></button>
+            </div>
+            
+            <div className="space-y-4">
+              <p className="text-stone-500 text-sm font-medium">Sélectionnez le séjour concerné :</p>
+              <div className="relative">
+                <input 
+                  type="text" 
+                  className="w-full p-4 pl-12 bg-stone-50 border border-stone-100 rounded-2xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                  placeholder="Rechercher Client ou Animal..."
+                  value={searchStay}
+                  onChange={e => setSearchStay(e.target.value)}
+                />
+                <Edit className="absolute left-4 top-4 text-stone-300" size={20} />
+              </div>
+              
+              <div className="max-h-64 overflow-y-auto space-y-2 pr-2">
+                {stays
+                  .filter(s => s.owner_name?.toLowerCase().includes(searchStay.toLowerCase()) || s.cat_name?.toLowerCase().includes(searchStay.toLowerCase()))
+                  .slice(0, 10)
+                  .map(s => (
+                    <button 
+                      key={s.id}
+                      onClick={() => { setSelectedStayId(s.id); setIsAddingNew(false); }}
+                      className="w-full p-4 text-left bg-stone-50 hover:bg-emerald-50 border border-stone-100 rounded-2xl transition-all flex justify-between items-center group"
+                    >
+                      <div>
+                        <p className="font-bold text-stone-900 group-hover:text-emerald-700">{s.owner_name}</p>
+                        <p className="text-xs text-stone-400 font-medium italic group-hover:text-emerald-600">Pour {s.cat_name} ({formatDateSafe(s.arrival_date)})</p>
+                      </div>
+                      <ChevronRight size={20} className="text-stone-300 group-hover:text-emerald-500 group-hover:translate-x-1 transition-all" />
+                    </button>
+                  ))
+                }
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Invoice Form Modal (when a stay is selected) */}
+      {selectedStayId && currentStay && (
+        <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-[100] animate-in fade-in duration-300 overflow-y-auto">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-8 my-8 space-y-6 transform animate-in zoom-in-95 duration-200 border border-stone-100">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="text-2xl font-black text-stone-900 tracking-tight">Gestion Facture</h3>
+                <p className="text-stone-400 text-sm font-medium italic">{currentStay.owner_name} • {currentStay.cat_name}</p>
+              </div>
+              <button 
+                onClick={() => { setSelectedStayId(null); fetchInvoices(); }} 
+                className="p-2 hover:bg-stone-50 rounded-full transition-colors"
+              >
+                <X size={24} className="text-stone-400" />
+              </button>
+            </div>
+            
+            <InvoiceSection 
+              stay={currentStay} 
+              settings={settings} 
+              showToast={showToast} 
+              askConfirm={askConfirm} 
+              onUpdate={() => { fetchInvoices(); onUpdate(); }} 
+            />
+            
+            <div className="pt-4 border-t border-stone-50 flex justify-end">
+              <button 
+                onClick={() => { setSelectedStayId(null); fetchInvoices(); }}
+                className="px-6 py-3 bg-stone-100 text-stone-600 rounded-2xl font-bold text-sm hover:bg-stone-200 transition-colors"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-8 rounded-3xl shadow-sm border border-stone-100">
+        <div>
+          <h2 className="text-3xl font-black text-stone-900 tracking-tight">Journal des Facturations</h2>
+          <p className="text-stone-400 text-sm font-medium italic mt-1">Pilotage de la trésorerie et suivi des encaissements</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-4 w-full sm:w-auto">
+          <button 
+            onClick={() => setIsAddingNew(true)}
+            className="flex-1 sm:flex-none p-4 bg-stone-900 text-white rounded-2xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-stone-800 transition-all shadow-lg active:scale-95"
+          >
+            <Plus size={20} /> Nouvelle Facture
+          </button>
+          <div className="bg-emerald-600 text-white p-4 px-8 rounded-2xl shadow-xl shadow-emerald-100 flex flex-col items-center min-w-[160px]">
+             <span className="text-[10px] font-bold uppercase tracking-widest opacity-80 mb-1">CA Encaissé (Période)</span>
+             <span className="text-3xl font-black">{totalCA.toFixed(2)} €</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-3xl shadow-sm border border-stone-100 space-y-6">
+        <div className="flex flex-wrap items-center gap-3 bg-stone-50 p-2 rounded-2xl">
+          <div className="flex-1 min-w-[200px] relative">
+            <input 
+              type="month" 
+              className="w-full p-3 bg-white border border-stone-100 rounded-xl text-sm font-bold text-stone-700 outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+              value={filterMonth}
+              onChange={(e) => setFilterMonth(e.target.value)}
+            />
+          </div>
+          <select 
+            className="flex-1 min-w-[180px] p-3 bg-white border border-stone-100 rounded-xl text-sm font-bold text-stone-700 outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+          >
+            <option value="all">Tous les statuts</option>
+            {Object.entries(settings.invoice_statuses || DEFAULT_INVOICE_STATUS_LABELS).map(([val, config]) => (
+              <option key={val} value={val}>{config.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="overflow-x-auto rounded-2xl border border-stone-100">
+          <table className="w-full text-left border-collapse">
+            <thead>
+               <tr className="bg-stone-50/50 border-b border-stone-100 text-[10px] font-black text-stone-400 uppercase tracking-widest">
+                 <th className="p-5">Date</th>
+                 <th className="p-5">N° Facture</th>
+                 <th className="p-5">Client / Animal</th>
+                 <th className="p-5">Statut / Paiement</th>
+                 <th className="p-5">Montant</th>
+                 <th className="p-5 text-right">Actions</th>
+               </tr>
+            </thead>
+            <tbody className="divide-y divide-stone-50">
+              {filteredInvoices.map(inv => {
+                const statusConfig = getInvoiceStatusConfig(inv.status, settings);
+                return (
+                  <tr key={inv.id} className="hover:bg-stone-50/50 transition-colors group">
+                    <td className="p-5 text-sm text-stone-500 font-medium">{formatDateSafe(inv.created_at)}</td>
+                    <td className="p-5 font-black text-stone-900 tracking-tight">{inv.invoice_number}</td>
+                    <td className="p-5">
+                      <div className="flex flex-col">
+                        <span className="font-bold text-stone-800">{inv.owner_name || "N/A"}</span>
+                        <span className="text-xs text-stone-400 font-medium italic">{inv.cat_name || "N/A"}</span>
+                      </div>
+                    </td>
+                    <td className="p-5">
+                      <div className="flex flex-col gap-1.5">
+                        <div 
+                          onClick={() => inv.status === 'partially_paid' && handleQuickPaid(inv)}
+                          className={`px-3 py-1 rounded-full text-[10px] font-black uppercase w-fit flex items-center gap-1.5 border transition-all cursor-default ${inv.status === 'partially_paid' ? 'hover:scale-105 hover:bg-emerald-500 hover:text-white hover:border-emerald-500 cursor-pointer' : ''} ${statusConfig.bg} ${statusConfig.color} border-current/20`}
+                          title={inv.status === 'partially_paid' ? "Cliquer pour marquer comme Payé" : ""}
+                        >
+                          {inv.status === 'partially_paid' && <CreditCard size={12} />}
+                          {statusConfig.label}
+                        </div>
+                        {inv.payment_method && (
+                          <span className="text-[10px] text-stone-400 font-bold ml-1 flex items-center gap-1 uppercase tracking-tight">
+                            <span className="w-1 h-1 rounded-full bg-stone-300"></span>
+                            {inv.payment_method}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-5">
+                      <div className="flex flex-col">
+                        <span className="font-black text-stone-900 text-base">
+                          {inv.type === 'final' ? (inv.amount - (inv.deposit_amount || 0)).toFixed(2) : inv.amount.toFixed(2)} €
+                        </span>
+                        {inv.type === 'final' && (
+                          <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-md mt-1 w-fit">
+                            Final (Acompte déduit)
+                          </span>
+                        )}
+                        {inv.type === 'deposit' && (
+                          <span className="text-[10px] font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded-md mt-1 w-fit">
+                            Acompte
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-5 text-right">
+                      <div className="flex justify-end gap-2">
+                        <button 
+                          title="Gérer / Éditer"
+                          onClick={() => setSelectedStayId(inv.stay_id)}
+                          className="p-3 text-stone-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-2xl transition-all"
+                        >
+                          <Edit size={20} />
+                        </button>
+                        <button 
+                          title="Supprimer"
+                          onClick={() => {
+                            askConfirm(
+                              "Supprimer la facture ?", 
+                              "Supprimer définitivement cette facture ? Cela impactera le CA.",
+                              async () => {
+                                try {
+                                  const res = await fetch(`/api/invoices/${inv.id}`, { method: "DELETE" });
+                                  if (!res.ok) throw new Error();
+                                  showToast("Facture supprimée !");
+                                  fetchInvoices();
+                                  onUpdate();
+                                } catch (err) {
+                                  showToast("Erreur suppression", "error");
+                                }
+                              },
+                              true
+                            );
+                          }}
+                          className="p-3 text-stone-300 hover:text-red-500 hover:bg-red-50 rounded-2xl transition-all"
+                        >
+                          <Trash2 size={20} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {filteredInvoices.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="p-20 text-center">
+                    <div className="bg-stone-50 w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <FileText className="text-stone-300" size={40} />
+                    </div>
+                    <h4 className="text-stone-900 font-bold">Aucune facturation</h4>
+                    <p className="text-stone-400 text-sm">Ajustez vos filtres ou créez votre première facture.</p>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
