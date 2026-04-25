@@ -44,7 +44,6 @@ export interface Stay {
   planned_departure: string;
   actual_departure?: string;
   comments: string;
-  is_archived: boolean;
   ate_well?: boolean;
   abnormal_behavior?: boolean;
   medication?: string;
@@ -2058,7 +2057,7 @@ function ClientDashboard({ client, cats, stays, settings, onBack, onUpdate, show
     const startDate = new Date(start).getTime();
     const endDate = new Date(end).getTime();
     return !stays.some(stay => {
-      if (stay.is_archived || stay.box_number !== box) return false;
+      if (stay.box_number !== box) return false;
       const stayStart = new Date(stay.arrival_date).getTime();
       const stayEnd = new Date(stay.actual_departure || stay.planned_departure).getTime();
       return (startDate <= stayEnd && endDate >= stayStart);
@@ -2289,7 +2288,7 @@ function ClientDashboard({ client, cats, stays, settings, onBack, onUpdate, show
                         {catStays.slice(0, 3).map(cs => (
                           <div key={cs.id} className="text-xs flex justify-between bg-stone-50 p-2 rounded-lg border border-stone-100">
                             <span>{formatDateSafe(cs.arrival_date)} → {formatDateSafe(cs.actual_departure || cs.planned_departure)}</span>
-                            <span className="font-bold text-emerald-700">Box {cs.box_number} {cs.is_archived && "(Terminé)"}</span>
+                            <span className="font-bold text-emerald-700">Box {cs.box_number} {((cs.actual_departure || cs.planned_departure) < new Date().toISOString().split('T')[0]) && "(Terminé)"}</span>
                           </div>
                         ))}
                       </div>
@@ -3205,7 +3204,7 @@ function CalendarView({ stays, onUpdate, settings, showToast, askConfirm }: { st
                         <button 
                           key={stay.id}
                           onClick={() => setSelectedStay(stay)}
-                          className={`w-full h-full rounded text-[8px] p-0.5 font-bold truncate ${stay.is_archived ? 'bg-stone-200 text-stone-500' : `${getBoxSolidColor(stay.box_number)} text-white`}`}
+                          className={`w-full h-full rounded text-[8px] p-0.5 font-bold truncate ${((stay.actual_departure || stay.planned_departure) < new Date().toISOString().split('T')[0]) ? 'bg-stone-200 text-stone-500' : `${getBoxSolidColor(stay.box_number)} text-white`}`}
                           title={`${stay.cat_name} (${stay.arrival_date} - ${stay.actual_departure || stay.planned_departure})`}
                         >
                           {stay.cat_name.substring(0, 3)}

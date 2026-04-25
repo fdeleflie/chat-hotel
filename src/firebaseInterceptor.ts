@@ -1,7 +1,36 @@
 import { db } from './firebase';
 import { 
-  collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc, getDoc, query, orderBy, where 
+  collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc, getDoc, query, orderBy, where, onSnapshot, QuerySnapshot 
 } from 'firebase/firestore';
+
+const CACHE: Record<string, QuerySnapshot> = {};
+const cacheWaits: Record<string, Promise<QuerySnapshot>> = {};
+
+class FilteredSnapshot {
+  docs: any[];
+  constructor(docs: any[]) {
+    this.docs = docs;
+  }
+  forEach(cb: any) {
+    this.docs.forEach(cb);
+  }
+}
+
+async function getCachedDocs(colName: string): Promise<QuerySnapshot> {
+  if (CACHE[colName]) return CACHE[colName];
+  if (!cacheWaits[colName]) {
+    cacheWaits[colName] = new Promise((resolve, reject) => {
+      onSnapshot(collection(db, colName), (snap) => {
+        CACHE[colName] = snap;
+        resolve(snap);
+      }, (err) => {
+        console.error(`Error in onSnapshot for ${colName}:`, err);
+        reject(err);
+      });
+    });
+  }
+  return cacheWaits[colName];
+}
 
 export const handleFirebaseApi = async (url: string, init?: RequestInit): Promise<Response> => {
   const method = init?.method || 'GET';
@@ -31,7 +60,7 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
     // --- SETTINGS ---
     if (path.startsWith('/api/settings')) {
       if (method === 'GET') {
-        const snap = await getDocs(collection(db, 'settings'));
+        const snap = await getCachedDocs('settings');
         const config: any = {};
         snap.forEach(d => { 
           const data = d.data();
@@ -76,23 +105,26 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
     // Helper function for stay deletion
     async function deleteStayRelatedData(db: any, stayId: string) {
        // Delete health logs
-       const hlSnap = await getDocs(query(collection(db, 'health_logs'), where('stay_id', '==', stayId)));
-       for (const d of hlSnap.docs) await deleteDoc(doc(db, 'health_logs', d.id));
+       const hlSnapAll = await getCachedDocs('health_logs');
+       const hlDocs = hlSnapAll.docs.filter((d: any) => d.data()['stay_id'] === stayId);
+       for (const d of hlDocs) await deleteDoc(doc(db, 'health_logs', d.id));
 
        // Delete media
-       const mSnap = await getDocs(query(collection(db, 'media'), where('stay_id', '==', stayId)));
-       for (const d of mSnap.docs) await deleteDoc(doc(db, 'media', d.id));
+       const mSnapAll = await getCachedDocs('media');
+       const mDocs = mSnapAll.docs.filter((d: any) => d.data()['stay_id'] === stayId);
+       for (const d of mDocs) await deleteDoc(doc(db, 'media', d.id));
 
        // Delete invoices
-       const iSnap = await getDocs(query(collection(db, 'invoices'), where('stay_id', '==', stayId)));
-       for (const d of iSnap.docs) await deleteDoc(doc(db, 'invoices', d.id));
+       const iSnapAll = await getCachedDocs('invoices');
+       const iDocs = iSnapAll.docs.filter((d: any) => d.data()['stay_id'] === stayId);
+       for (const d of iDocs) await deleteDoc(doc(db, 'invoices', d.id));
     }
 
     // --- CLIENTS ---
     if (path === '/api/clients') {
       if (method === 'GET') {
-        const snap = await getDocs(collection(db, 'clients'));
-        return jsonResponse(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        const snap = await getCachedDocs('clients');
+        return jsonResponse(snap.docs.map((d: any) => ({ id: d.id, ...d.data() })));
       }
       if (method === 'POST') {
         const docRef = await addDoc(collection(db, 'clients'), body);
@@ -107,10 +139,12 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
       }
       if (method === 'DELETE') {
         // Recursive delete: Cats -> Stays -> Related
-        const catsSnap = await getDocs(query(collection(db, 'cats'), where('owner_id', '==', id)));
-        for(const catDoc of catsSnap.docs) {
-           const staysSnap = await getDocs(query(collection(db, 'stays'), where('cat_id', '==', catDoc.id)));
-           for(const stayDoc of staysSnap.docs) {
+        const catsSnapAll = await getCachedDocs('cats');
+        const catsDocs = catsSnapAll.docs.filter((d: any) => d.data()['owner_id'] === id);
+        for(const catDoc of catsDocs) {
+           const staysSnapAll = await getCachedDocs('stays');
+           const staysDocs = staysSnapAll.docs.filter((d: any) => d.data()['cat_id'] === catDoc.id);
+           for(const stayDoc of staysDocs) {
               await deleteStayRelatedData(db, stayDoc.id);
               await deleteDoc(doc(db, 'stays', stayDoc.id));
            }
@@ -125,8 +159,8 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
     if (path === '/api/cats') {
       if (method === 'GET') {
         const [catsSnap, clientsSnap] = await Promise.all([
-          getDocs(collection(db, 'cats')),
-          getDocs(collection(db, 'clients'))
+          getCachedDocs('cats'),
+          getCachedDocs('clients')
         ]);
         const clientsMap = new Map(clientsSnap.docs.map(d => [d.id, d.data().name]));
         return jsonResponse(catsSnap.docs.map(d => {
@@ -146,8 +180,9 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
         return jsonResponse({ success: true });
       }
       if (method === 'DELETE') {
-        const staysSnap = await getDocs(query(collection(db, 'stays'), where('cat_id', '==', id)));
-        for(const stayDoc of staysSnap.docs) {
+        const staysSnapAll = await getCachedDocs('stays');
+        const staysDocs = staysSnapAll.docs.filter((d: any) => d.data()['cat_id'] === id);
+        for(const stayDoc of staysDocs) {
           await deleteStayRelatedData(db, stayDoc.id);
           await deleteDoc(doc(db, 'stays', stayDoc.id));
         }
@@ -159,10 +194,10 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
     // --- STAYS ---
     if (path === '/api/stays') {
       if (method === 'GET') {
-        const staysSnap = await getDocs(collection(db, 'stays'));
-        const catsSnap = await getDocs(collection(db, 'cats'));
-        const clientsSnap = await getDocs(collection(db, 'clients'));
-        const healthSnap = await getDocs(collection(db, 'health_logs'));
+        const staysSnap = await getCachedDocs('stays');
+        const catsSnap = await getCachedDocs('cats');
+        const clientsSnap = await getCachedDocs('clients');
+        const healthSnap = await getCachedDocs('health_logs');
 
         const catsMap = new Map(catsSnap.docs.map(d => [d.id, d.data()]));
         const clientsMap = new Map(clientsSnap.docs.map(d => [d.id, d.data()]));
@@ -215,11 +250,11 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
 
         await updateDoc(doc(db, 'stays', id), updateData);
 
-        const q = query(collection(db, 'health_logs'), where('stay_id', '==', id));
-        const healthSnap = await getDocs(q);
+        const healthSnapAll = await getCachedDocs('health_logs');
+        const healthDocs = healthSnapAll.docs.filter((d: any) => d.data()['stay_id'] === id);
         let latestLogId = null;
         let latestDate = '';
-        healthSnap.docs.forEach(d => {
+        healthDocs.forEach(d => {
           if (d.data().date > latestDate) {
             latestDate = d.data().date;
             latestLogId = d.id;
@@ -253,10 +288,10 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
 
     // --- HEALTH LOGS ---
     if (path === '/api/health-reports') {
-      const staysSnap = await getDocs(collection(db, 'stays'));
-      const catsSnap = await getDocs(collection(db, 'cats'));
-      const clientsSnap = await getDocs(collection(db, 'clients'));
-      const healthSnap = await getDocs(collection(db, 'health_logs'));
+      const staysSnap = await getCachedDocs('stays');
+      const catsSnap = await getCachedDocs('cats');
+      const clientsSnap = await getCachedDocs('clients');
+      const healthSnap = await getCachedDocs('health_logs');
 
       const catsMap = new Map(catsSnap.docs.map(d => [d.id, d.data()]));
       const clientsMap = new Map(clientsSnap.docs.map(d => [d.id, d.data()]));
@@ -293,9 +328,9 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
     if (path.startsWith('/api/health-logs')) {
       if (method === 'GET') {
         const stayId = path.split('/').pop()!;
-        const q = query(collection(db, 'health_logs'), where('stay_id', '==', stayId));
-        const snap = await getDocs(q);
-        const logs = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => b.date.localeCompare(a.date));
+        const snapAll = await getCachedDocs('health_logs');
+        const snap = { docs: snapAll.docs.filter((d: any) => d.data()['stay_id'] === stayId) };
+        const logs = snap.docs.map((d: any) => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => b.date.localeCompare(a.date));
         return jsonResponse(logs);
       }
       if (method === 'POST') {
@@ -311,17 +346,17 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
     
     // --- STATS ---
     if (path === '/api/stats') {
-      const dbSettings = await getDocs(collection(db, 'settings'));
+      const dbSettings = await getCachedDocs('settings');
       let totalBoxes = 3;
-      dbSettings.docs.forEach(d => {
+      dbSettings.forEach((d: any) => {
         if (d.id === 'total_boxes') {
           totalBoxes = parseInt(d.data().value) || 3;
         }
       });
       
-      const invoicesSnap = await getDocs(collection(db, 'invoices'));
+      const invoicesSnap = await getCachedDocs('invoices');
       const revenueMap: Record<string, number> = {};
-      invoicesSnap.docs.forEach(d => {
+      invoicesSnap.forEach((d: any) => {
         const inv = d.data();
         if (inv.created_at) {
           // CA Encaissé: only count paid or partially_paid invoices
@@ -335,9 +370,9 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
       });
       const revenue = Object.keys(revenueMap).map(month => ({ month, total: revenueMap[month] })).sort((a, b) => b.month.localeCompare(a.month));
 
-      const staysSnap = await getDocs(collection(db, 'stays'));
+      const staysSnap = await getCachedDocs('stays');
       const occupancyMap: Record<string, number> = {};
-      staysSnap.docs.forEach(d => {
+      staysSnap.forEach((d: any) => {
         const stay = d.data();
         if (stay.arrival_date && stay.planned_departure) {
           const arrival = new Date(stay.arrival_date);
@@ -359,16 +394,16 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
     // --- INVOICES ---
     if (path === '/api/invoices/all') {
       if (method === 'GET') {
-        const snap = await getDocs(collection(db, 'invoices'));
-        return jsonResponse(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        const snap = await getCachedDocs('invoices');
+        return jsonResponse(snap.docs.map((d: any) => ({ id: d.id, ...d.data() })));
       }
     }
     if (path.startsWith('/api/invoices')) {
       if (method === 'GET') {
         const stayId = path.split('/').pop()!;
-        const q = query(collection(db, 'invoices'), where('stay_id', '==', stayId));
-        const snap = await getDocs(q);
-        return jsonResponse(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        const snapAll = await getCachedDocs('invoices');
+        const snap = { docs: snapAll.docs.filter((d: any) => d.data()['stay_id'] === stayId) };
+        return jsonResponse(snap.docs.map((d: any) => ({ id: d.id, ...d.data() })));
       }
       if (method === 'POST') {
         const year = body.created_at ? body.created_at.substring(0, 4) : new Date().getFullYear().toString();
@@ -397,9 +432,9 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
     if (path.startsWith('/api/media')) {
       if (method === 'GET') {
         const stayId = path.split('/').pop()!;
-        const q = query(collection(db, 'media'), where('stay_id', '==', stayId));
-        const snap = await getDocs(q);
-        return jsonResponse(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        const snapAll = await getCachedDocs('media');
+        const snap = { docs: snapAll.docs.filter((d: any) => d.data()['stay_id'] === stayId) };
+        return jsonResponse(snap.docs.map((d: any) => ({ id: d.id, ...d.data() })));
       }
       if (method === 'DELETE') {
         const id = path.split('/').pop()!;
@@ -439,8 +474,8 @@ export const handleFirebaseApi = async (url: string, init?: RequestInit): Promis
       
       const backupData: any = {};
       for (const col of collections) {
-        const snap = await getDocs(collection(db, col));
-        backupData[col] = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const snap = await getCachedDocs(col);
+        backupData[col] = snap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
       }
       return jsonResponse(backupData);
     }
